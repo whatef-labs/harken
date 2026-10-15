@@ -11,6 +11,7 @@ declare(strict_types=1);
  * Env: SPIKE_PG_DSN (host=127.0.0.1 port=5432 dbname=postgres user=root)
  */
 
+use Pdo\Pgsql;
 use React\EventLoop\Loop;
 
 use function React\Async\await;
@@ -140,7 +141,7 @@ foreach (explode(' ', $dsn) as $pair) {
     [$k, $v] = explode('=', $pair, 2);
     $parts[$k] = $v;
 }
-$pdo = new Pdo\Pgsql("pgsql:host={$parts['host']};port={$parts['port']};dbname={$parts['dbname']}", $parts['user'], $parts['password'] ?? null);
+$pdo = new Pgsql("pgsql:host={$parts['host']};port={$parts['port']};dbname={$parts['dbname']}", $parts['user'], $parts['password'] ?? null);
 $pdo->exec("LISTEN {$channel}");
 
 foreach ([0.01, 0.05, 0.1] as $interval) {

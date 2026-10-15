@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use React\EventLoop\LoopInterface;
 
 /*
  * Small helpers shared by the spike scripts. Spikes are throwaway
@@ -45,7 +46,7 @@ function spike_line(string $label, mixed $value): void
  *
  * @return array{n: int, p50: float, p99: float, max: float}
  */
-function spike_loop_lag(React\EventLoop\LoopInterface $loop, float $seconds): array
+function spike_loop_lag(LoopInterface $loop, float $seconds): array
 {
     $lags = [];
     $last = hrtime(true);
