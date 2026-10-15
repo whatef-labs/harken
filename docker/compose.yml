@@ -1,0 +1,58 @@
+# Local brokers and stores for integration tests and spikes.
+#
+#   sh docker/certs/generate.sh            # once; add IP:<host-ip> to reach TLS from another machine
+#   docker compose -f docker/compose.yml up -d
+#
+# EMQX 5.8.x is the last Apache-2.0 release line; later versions use the BSL.
+#
+# Ports
+#   1883   MQTT over TCP
+#   8883   MQTT over TLS (server certificate from docker/certs, no client certificate)
+#   8884   MQTT over mutual TLS (client certificate signed by docker/certs/ca.crt required)
+#   18083  EMQX dashboard (admin / public)
+#   6379   Redis
+#   5432   PostgreSQL (harken / harken)
+
+name: harken-dev
+
+services:
+  emqx:
+    image: emqx/emqx:${EMQX_VERSION:-5.8.9}
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+      - "8884:8884"
+      - "18083:18083"
+    environment:
+      EMQX_LISTENERS__SSL__DEFAULT__BIND: "0.0.0.0:8883"
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CACERTFILE: /opt/emqx/etc/certs/harken/ca.crt
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CERTFILE: /opt/emqx/etc/certs/harken/server.crt
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__KEYFILE: /opt/emqx/etc/certs/harken/server.key
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__VERIFY: verify_none
+      EMQX_LISTENERS__SSL__MTLS__BIND: "0.0.0.0:8884"
+      EMQX_LISTENERS__SSL__MTLS__SSL_OPTIONS__CACERTFILE: /opt/emqx/etc/certs/harken/ca.crt
+      EMQX_LISTENERS__SSL__MTLS__SSL_OPTIONS__CERTFILE: /opt/emqx/etc/certs/harken/server.crt
+      EMQX_LISTENERS__SSL__MTLS__SSL_OPTIONS__KEYFILE: /opt/emqx/etc/certs/harken/server.key
+      EMQX_LISTENERS__SSL__MTLS__SSL_OPTIONS__VERIFY: verify_peer
+      EMQX_LISTENERS__SSL__MTLS__SSL_OPTIONS__FAIL_IF_NO_PEER_CERT: "true"
+    volumes:
+      - ./certs:/opt/emqx/etc/certs/harken:ro
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: harken
+      POSTGRES_PASSWORD: harken
+      POSTGRES_DB: harken
+    ports:
+      - "5432:5432"

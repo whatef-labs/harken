@@ -1,0 +1,71 @@
+{
+    "name": "whatef/harken",
+    "description": "A long-running, event-driven MQTT client runtime for Laravel.",
+    "keywords": ["laravel", "mqtt", "reactphp", "iot", "runtime"],
+    "license": "MIT",
+    "type": "library",
+    "require": {
+        "php": "^8.4",
+        "binsoul/net-mqtt": "^2.0",
+        "clue/redis-react": "^2.8",
+        "evenement/evenement": "^3.0",
+        "illuminate/bus": "^12.0 || ^13.0",
+        "illuminate/console": "^12.0 || ^13.0",
+        "illuminate/contracts": "^12.0 || ^13.0",
+        "illuminate/queue": "^12.0 || ^13.0",
+        "illuminate/redis": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "react/async": "^4.3",
+        "react/event-loop": "^1.6",
+        "react/promise": "^3.2",
+        "react/socket": "^1.14"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.13",
+        "laravel/pint": "^1.32",
+        "orchestra/testbench": "^10.12 || ^11.3",
+        "pestphp/pest": "^4.7 || ^5.3"
+    },
+    "suggest": {
+        "ext-pcntl": "Graceful shutdown on SIGTERM / SIGINT (Linux, macOS).",
+        "ext-pgsql": "PostgreSQL LISTEN/NOTIFY event source driven by the event loop instead of polling.",
+        "ext-uv": "libuv event loop backend, picked up automatically when installed."
+    },
+    "autoload": {
+        "psr-4": {
+            "Whatef\\Harken\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Whatef\\Harken\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Whatef\\Harken\\Laravel\\HarkenServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "lint": "pint",
+        "test:lint": "pint --test",
+        "test:types": "phpstan analyse --memory-limit=1G",
+        "test:unit": "pest --exclude-group=integration",
+        "test:integration": "pest --group=integration",
+        "test": [
+            "@test:lint",
+            "@test:types",
+            "@test:unit"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

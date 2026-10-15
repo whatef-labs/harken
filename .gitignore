@@ -1,0 +1,11 @@
+/vendor/
+/composer.lock
+/.phpunit.cache/
+/.phpunit.result.cache
+/build/
+/.idea/
+/.vscode/
+/docker/certs/*
+!/docker/certs/generate.sh
+.DS_Store
+.env

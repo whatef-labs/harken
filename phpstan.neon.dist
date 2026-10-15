@@ -1,0 +1,17 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+    tmpDir: build/phpstan
+    ignoreErrors:
+        # Skeletons: dependencies are injected now and read once the class is
+        # implemented. Remove each path as its implementation lands.
+        -
+            identifier: property.onlyWritten
+            paths:
+                - src/Runtime/Connection/Connection.php
+                - src/Runtime/Keepalive.php
+                - src/Runtime/Sources/PgNotifySource.php

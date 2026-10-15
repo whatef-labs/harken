@@ -1,0 +1,20 @@
+<?php
+
+use Whatef\Harken\Facades\Harken;
+
+/*
+|--------------------------------------------------------------------------
+| Harken Routes
+|--------------------------------------------------------------------------
+|
+| Register MQTT topic handlers here. A {name} level captures a route
+| parameter. Inline handlers run on the event loop and must stay short;
+| add ->queued() to run a handler on a queue worker instead.
+|
+*/
+
+// Harken::topic('sensors/{id}/temperature', App\Mqtt\TemperatureHandler::class)->qos(1);
+
+// Harken::every(60, function () {
+//     //
+// });
