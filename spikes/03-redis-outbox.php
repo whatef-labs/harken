@@ -18,6 +18,8 @@ use Clue\React\Redis\Client as RedisClient;
 use Clue\React\Redis\Factory as RedisFactory;
 use React\EventLoop\Loop;
 use React\Promise\PromiseInterface;
+use Whatef\Harken\Protocol\Packet\Publish;
+use Whatef\Harken\Transport\Endpoint;
 
 use function React\Async\async;
 use function React\Async\await;
@@ -126,7 +128,9 @@ $stop = true;
 await($pending);
 
 // ------------------------------------------------- E3 consume -> publish -> ack
-$consume = static function (string $consumer, int $expect, float $timeout, bool $ack = true) use ($reader, $acker, $group, $urgent, $normal, $publish, $entries): array {
+$consume = static function (string $consumer, int $expect, float $timeout, bool $ack = true, ?Closure $publisher = null) use ($reader, $acker, $group, $urgent, $normal, $publish, $entries): array {
+    $publish = $publisher ?? $publish;
+
     return await(async(function () use ($consumer, $expect, $timeout, $ack, $reader, $acker, $group, $urgent, $normal, $publish, $entries) {
         $latency = ['urgent' => [], 'normal' => []];
         $seen = 0;
@@ -143,7 +147,7 @@ $consume = static function (string $consumer, int $expect, float $timeout, bool 
                 foreach ($entries($list) as $id => $fields) {
                     $seen++;
                     $kind = $stream === $urgent ? 'urgent' : 'normal';
-                    $inflight[] = $publish()->then(function () use ($ack, $acker, $stream, $group, $id, $fields, &$latency, $kind) {
+                    $inflight[] = $publish($fields)->then(function () use ($ack, $acker, $stream, $group, $id, $fields, &$latency, $kind) {
                         if (! $ack) {
                             return null;
                         }
@@ -223,6 +227,47 @@ do {
 } while ($cursor !== '0-0');
 spike_line('reclaimed and acked by restarted consumer', $reclaimed);
 spike_line('XPENDING (count) after reclaim', $sync->xPending($normal, $group)[0] ?? null);
+
+// ------------------------------------------------- E6 B1 with a real broker
+if (getenv('SPIKE_MQTT_HOST')) {
+    require_once __DIR__.'/MiniClient.php';
+    $run = bin2hex(random_bytes(3));
+    $mqtt = await(MiniClient::connect(new Endpoint(getenv('SPIKE_MQTT_HOST'), (int) (getenv('SPIKE_MQTT_PORT') ?: 1883)), "spike03-{$run}"));
+    $inbound = 0;
+    $mqtt->onMessage = function (Publish $p) use (&$inbound) {
+        $inbound++;
+        hash_hmac('sha256', $p->payload, 'handler-key'); // a light inline handler
+    };
+    await($mqtt->subscribe(["spike/{$run}/inbound" => 1]));
+    $realPublish = static fn (array $fields): PromiseInterface => $mqtt->publish($fields['topic'], $fields['payload'], 1);
+
+    foreach ([0, 10000] as $inboundRate) {
+        echo "\nE6  outbox -> EMQX QoS 1 (real PUBACK), urgent 100/s for 5 s, while receiving {$inboundRate} msg/s\n";
+        $reset();
+        $inbound = 0;
+        $load = $inboundRate > 0
+            ? proc_open([PHP_BINARY, __DIR__.'/01-connect-qos1-tls.php', 'publish', "spike/{$run}/inbound", (string) $inboundRate, '6'], [1 => ['pipe', 'w']], $loadPipes)
+            : null;
+        await(delay(0.5));
+        $producer = $produce($urgent, 500, 100);
+        $result = $consume('c1', 500, 30.0, true, $realPublish);
+        spike_line('producer XADD latency (ms)', $finish($producer));
+        spike_line('urgent enqueue -> PUBACK -> XACK (ms)', $result['urgent']);
+        if ($load !== null) {
+            stream_set_blocking($loadPipes[1], false);
+            $output = '';
+            while (! feof($loadPipes[1])) {
+                $output .= (string) fread($loadPipes[1], 8192);
+                await(delay(0.05));
+            }
+            $sent = json_decode($output, true)['sent'] ?? 0;
+            proc_close($load);
+            await(delay(1.0));
+            spike_line('inbound received / sent', "{$inbound} / {$sent}");
+        }
+    }
+    $mqtt->disconnect();
+}
 
 $sync->del($urgent, $normal);
 $reader->close();
