@@ -38,6 +38,27 @@ $plain = new Endpoint($host, $port);
 
 $connect = static fn (Endpoint $e, string $id, bool $clean = true, int $keepAlive = 60) => MiniClient::connect($e, "spike01-{$run}-{$id}", $clean, $keepAlive, $user, $pass);
 
+// ---------------------------------------------------------------- publisher subprocess (E7)
+if (($argv[1] ?? null) === 'publish') {
+    [, , $topic, $rate, $seconds] = $argv;
+    $publisher = await($connect($plain, 'loadgen'));
+    $perTick = max(1, intdiv((int) $rate, 100));
+    $ticks = (int) ((float) $seconds * 100);
+    $start = microtime(true);
+    $pending = [];
+    for ($tick = 0; $tick < $ticks; $tick++) {
+        for ($i = 0; $i < $perTick; $i++) {
+            $pending[] = $publisher->publish($topic, str_repeat('x', 400), 1);
+        }
+        $due = $start + ($tick + 1) / 100;
+        await(delay(max(0.0, $due - microtime(true))));
+    }
+    await(all($pending));
+    $publisher->disconnect();
+    fwrite(STDOUT, json_encode(['sent' => $perTick * $ticks, 'seconds' => round(microtime(true) - $start, 2)]));
+    exit(0);
+}
+
 spike_line('broker', "{$host}:{$port} (tls {$tlsPort}, mtls {$mtlsPort})");
 spike_line('run id', $run);
 spike_line('platform', PHP_OS_FAMILY.' / PHP '.PHP_VERSION);
@@ -191,6 +212,57 @@ for ($i = 0; $i < 5; $i++) {
 spike_line('silent client closed by broker after (ms)', $closedAt === null ? 'still open after 10 s' : round($closedAt));
 spike_line('client pinging every 2 s', $pinging->isClosed() ? 'closed' : 'still connected; PINGRESP '.json_encode(spike_percentiles($pingRtt)));
 $pinging->disconnect();
+
+// ------------------------------------------------- E7 inbound throughput
+echo "\nE7  inbound from another process, 400 B QoS 1 publishes for 3 s, receiver acks on receipt\n";
+foreach ([1 => 'QoS 1 subscription', 0 => 'QoS 0 subscription'] as $subQos => $label) {
+    foreach ([5000, 10000, 20000] as $rate) {
+        $loadTopic = "spike/{$run}/load/{$subQos}/{$rate}";
+        $receiver = await($connect($plain, "rx{$subQos}{$rate}"));
+        $count = 0;
+        $receiver->onMessage = function () use (&$count) {
+            $count++;
+        };
+        await($receiver->subscribe([$loadTopic => $subQos]));
+        $process = proc_open([PHP_BINARY, $argv[0], 'publish', $loadTopic, (string) $rate, '3'], [1 => ['pipe', 'w']], $pipes);
+        stream_set_blocking($pipes[1], false);
+        $output = '';
+        while (! feof($pipes[1])) {
+            $output .= (string) fread($pipes[1], 8192);
+            await(delay(0.05));
+        }
+        proc_close($process);
+        await(delay(1.0));
+        $sent = json_decode($output, true)['sent'] ?? 0;
+        spike_line("{$label}, {$rate} msg/s", sprintf('received %d / %d (%.1f%%)', $count, $sent, $sent > 0 ? 100 * $count / $sent : 0));
+        $receiver->disconnect();
+    }
+}
+
+// ------------------------------------------------- E8 one connection publishing and receiving
+echo "\nE8  one connection publishes at a paced rate to a topic it subscribes to (QoS 1), 3 s\n";
+foreach ([5000, 10000, 15000, 20000] as $rate) {
+    $both = await($connect($plain, "both{$rate}"));
+    $echoTopic = "spike/{$run}/both/{$rate}";
+    $count = 0;
+    $both->onMessage = function () use (&$count) {
+        $count++;
+    };
+    await($both->subscribe([$echoTopic => 1]));
+    $perTick = intdiv($rate, 100);
+    $start = microtime(true);
+    $pending = [];
+    for ($tick = 0; $tick < 300; $tick++) {
+        for ($i = 0; $i < $perTick; $i++) {
+            $pending[] = $both->publish($echoTopic, str_repeat('x', 400), 1);
+        }
+        await(delay(max(0.0, $start + ($tick + 1) / 100 - microtime(true))));
+    }
+    await(all($pending));
+    await(delay(1.0));
+    spike_line("{$rate} msg/s out and back in", sprintf('received %d / %d (%.1f%%)', $count, $perTick * 300, 100 * $count / ($perTick * 300)));
+    $both->disconnect();
+}
 
 $client->disconnect();
 await(delay(0.2));
