@@ -7,6 +7,7 @@ namespace Whatef\Harken\Laravel\Testing;
 use PHPUnit\Framework\Assert as PHPUnit;
 use React\Promise\PromiseInterface;
 use Whatef\Harken\Laravel\HarkenManager;
+use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Message;
 use Whatef\Harken\Runtime\Publisher;
 use Whatef\Harken\Runtime\Routing\HandlerInvoker;
@@ -20,7 +21,7 @@ use function React\Promise\resolve;
  */
 class HarkenFake extends HarkenManager
 {
-    /** @var list<array{topic: string, payload: string, qos: int, retain: bool}> */
+    /** @var list<array{topic: string, payload: string, qos: int, retain: bool, properties: Properties}> */
     private array $published = [];
 
     public function __construct(HarkenManager $manager, private readonly HandlerInvoker $invoker)
@@ -30,11 +31,11 @@ class HarkenFake extends HarkenManager
         $this->routesLoaded = $manager->routesLoaded;
     }
 
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false): PromiseInterface
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
     {
         Topic::assertPublishable($topic, $qos);
 
-        $this->published[] = ['topic' => $topic, 'payload' => $payload, 'qos' => $qos, 'retain' => $retain];
+        $this->published[] = ['topic' => $topic, 'payload' => $payload, 'qos' => $qos, 'retain' => $retain, 'properties' => $properties ?? new Properties];
 
         return resolve(null);
     }
@@ -49,7 +50,7 @@ class HarkenFake extends HarkenManager
      * now and their exceptions reach the caller; queued routes dispatch
      * their job. Topics without a route are ignored, as in the runtime.
      */
-    public function simulate(string $topic, string $payload, int $qos = 0, bool $retain = false): void
+    public function simulate(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): void
     {
         $match = $this->router()->match($topic);
 
@@ -57,11 +58,11 @@ class HarkenFake extends HarkenManager
             return;
         }
 
-        $this->invoker->invoke($match->route, new Message($topic, $payload, $qos, $retain, $match->params));
+        $this->invoker->invoke($match->route, new Message($topic, $payload, $qos, $retain, $match->params, $properties ?? new Properties));
     }
 
     /**
-     * @param  (callable(string $payload, int $qos, bool $retain): bool)|null  $callback
+     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties): bool)|null  $callback
      */
     public function assertPublished(string $topic, ?callable $callback = null): void
     {
@@ -72,7 +73,7 @@ class HarkenFake extends HarkenManager
     }
 
     /**
-     * @param  (callable(string $payload, int $qos, bool $retain): bool)|null  $callback
+     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties): bool)|null  $callback
      */
     public function assertNotPublished(string $topic, ?callable $callback = null): void
     {
@@ -90,15 +91,15 @@ class HarkenFake extends HarkenManager
     }
 
     /**
-     * @param  (callable(string $payload, int $qos, bool $retain): bool)|null  $callback
-     * @return list<array{topic: string, payload: string, qos: int, retain: bool}>
+     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties): bool)|null  $callback
+     * @return list<array{topic: string, payload: string, qos: int, retain: bool, properties: Properties}>
      */
     public function published(string $topic, ?callable $callback = null): array
     {
         return array_values(array_filter(
             $this->published,
             static fn (array $message): bool => $message['topic'] === $topic
-                && ($callback === null || $callback($message['payload'], $message['qos'], $message['retain'])),
+                && ($callback === null || $callback($message['payload'], $message['qos'], $message['retain'], $message['properties'])),
         ));
     }
 }

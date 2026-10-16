@@ -8,6 +8,7 @@ use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Laravel\HarkenManager;
 use Whatef\Harken\Laravel\Queue\HandleMessage;
 use Whatef\Harken\Laravel\Testing\HarkenFake;
+use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Message;
 use Whatef\Harken\Tests\Fixtures\RecordingHandler;
 use Whatef\Harken\Tests\Fixtures\SlowJobHandler;
@@ -31,6 +32,17 @@ describe('publishing', function () {
         Harken::assertNotPublished('cmd/door/1', fn (string $payload, int $qos) => $qos === 0);
 
         expect($fake->published('cmd/door/1'))->toHaveCount(1);
+    });
+
+    it('records MQTT 5 properties and passes them to assertion callbacks', function () {
+        Harken::fake();
+
+        Harken::publish('cmd/door/1', '{}', 1, properties: new Properties(contentType: 'application/json', userProperties: ['trace' => 'abc']));
+        Harken::publish('cmd/door/2', '{}');
+
+        Harken::assertPublished('cmd/door/1', fn (string $payload, int $qos, bool $retain, Properties $properties) => $properties->userProperty('trace') === 'abc'
+            && $properties->contentType === 'application/json');
+        Harken::assertPublished('cmd/door/2', fn (string $payload, int $qos, bool $retain, Properties $properties) => $properties->isEmpty());
     });
 
     it('fails assertions with a clear message', function () {
@@ -74,6 +86,14 @@ describe('simulating inbound messages', function () {
             ->and($message->param('id'))->toBe('42')
             ->and($message->payload)->toBe("\x00\x01{\"t\":21.5}")
             ->and($message->qos)->toBe(1);
+    });
+
+    it('hands simulated MQTT 5 properties to the handler', function () {
+        Harken::fake();
+
+        Harken::simulate('sensors/42/temperature', '21.5', properties: new Properties(responseTopic: 'reply/42'));
+
+        expect(RecordingHandler::$messages[0]->properties->responseTopic)->toBe('reply/42');
     });
 
     it('dispatches queued routes as jobs instead of running them', function () {

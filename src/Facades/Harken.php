@@ -11,10 +11,10 @@ use Whatef\Harken\Runtime\Routing\HandlerInvoker;
 
 /**
  * @method static \Whatef\Harken\Runtime\Routing\Route topic(string $pattern, string|callable $handler)
- * @method static \React\Promise\PromiseInterface<mixed> publish(string $topic, string $payload, int $qos = 0, bool $retain = false)
+ * @method static \React\Promise\PromiseInterface<mixed> publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?\Whatef\Harken\Protocol\Properties $properties = null)
  * @method static \React\Promise\PromiseInterface<mixed> clearRetained(string $topic)
  * @method static void every(int|float $seconds, callable $callback)
- * @method static void simulate(string $topic, string $payload, int $qos = 0, bool $retain = false)
+ * @method static void simulate(string $topic, string $payload, int $qos = 0, bool $retain = false, ?\Whatef\Harken\Protocol\Properties $properties = null)
  * @method static void assertPublished(string $topic, ?callable $callback = null)
  * @method static void assertNotPublished(string $topic, ?callable $callback = null)
  * @method static void assertNothingPublished()

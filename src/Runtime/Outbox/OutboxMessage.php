@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Whatef\Harken\Runtime\Outbox;
 
+use InvalidArgumentException;
+use JsonException;
 use UnexpectedValueException;
+use Whatef\Harken\Protocol\Properties;
 
 /**
  * A publish request handed to the runtime through a Redis stream entry.
- * Redis stream values are binary-safe, so the payload is stored as-is.
+ * Redis stream values are binary-safe, so the payload is stored as-is. MQTT 5
+ * properties, when set, travel as one JSON field.
  */
 final readonly class OutboxMessage
 {
@@ -18,6 +22,7 @@ final readonly class OutboxMessage
         public int $qos = 0,
         public bool $retain = false,
         public ?int $enqueuedAtMs = null,
+        public Properties $properties = new Properties,
     ) {}
 
     /**
@@ -25,13 +30,19 @@ final readonly class OutboxMessage
      */
     public function toFields(): array
     {
-        return [
+        $fields = [
             'topic' => $this->topic,
             'payload' => $this->payload,
             'qos' => (string) $this->qos,
             'retain' => $this->retain ? '1' : '0',
             'enqueued_at' => (string) ($this->enqueuedAtMs ?? (int) (microtime(true) * 1000)),
         ];
+
+        if (! $this->properties->isEmpty()) {
+            $fields['properties'] = json_encode($this->properties->toArray(), JSON_THROW_ON_ERROR);
+        }
+
+        return $fields;
     }
 
     /**
@@ -48,6 +59,15 @@ final readonly class OutboxMessage
         }
 
         $enqueuedAt = $fields['enqueued_at'] ?? null;
+        $properties = $fields['properties'] ?? null;
+
+        try {
+            $properties = is_string($properties)
+                ? Properties::fromArray((array) json_decode($properties, true, flags: JSON_THROW_ON_ERROR))
+                : new Properties;
+        } catch (InvalidArgumentException|JsonException $e) {
+            throw new UnexpectedValueException('Malformed outbox entry properties.', 0, $e);
+        }
 
         return new self(
             topic: $topic,
@@ -55,6 +75,7 @@ final readonly class OutboxMessage
             qos: (int) $qos,
             retain: ($fields['retain'] ?? '0') === '1',
             enqueuedAtMs: is_string($enqueuedAt) && ctype_digit($enqueuedAt) ? (int) $enqueuedAt : null,
+            properties: $properties,
         );
     }
 }

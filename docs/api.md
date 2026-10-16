@@ -67,7 +67,7 @@ final readonly class Message
         public int $qos = 0,
         public bool $retain = false,
         public array $params = [],       // array<string, string> route parameters
-        public array $properties = [],   // array<string, mixed>, MQTT 5 properties (empty on 3.1.1)
+        public Properties $properties = new Properties, // MQTT 5 message properties (empty on 3.1.1)
     ) {}
 
     public function param(string $name, ?string $default = null): ?string;
@@ -76,16 +76,50 @@ final readonly class Message
 
 The payload stays byte-for-byte identical through queue serialization.
 
+### `Whatef\Harken\Protocol\Properties` — stable
+
+MQTT 5 message properties, used for inbound messages and as the last argument of `publish()`. Values are validated on construction (`InvalidArgumentException`). MQTT 3.1.1 cannot carry properties: on a 3.1.1 connection they are empty inbound and dropped outbound.
+
+```php
+final readonly class Properties
+{
+    public function __construct(
+        public ?string $contentType = null,
+        public ?string $responseTopic = null,         // topic name, no wildcards
+        public ?string $correlationData = null,       // binary
+        public ?int $messageExpiryInterval = null,    // seconds, 0..4294967295
+        public bool $payloadFormatIndicator = false,  // true: the payload is UTF-8 text
+        array $userProperties = [],                   // array<string, string|list<string>>
+        public array $subscriptionIdentifiers = [],   // list<int>, set by the broker on inbound messages
+    ) {}
+
+    public array $userProperties;                     // a repeated name maps to a list of its values
+    public function userProperty(string $name): ?string;  // first value
+    public function isEmpty(): bool;
+}
+```
+
+```php
+use Whatef\Harken\Protocol\Properties;
+
+Harken::publish('cmd/door/1', '{"open":true}', qos: 1, properties: new Properties(
+    contentType: 'application/json',
+    messageExpiryInterval: 30,
+    userProperties: ['trace-id' => $traceId],
+));
+```
+
+User properties keep every value of a repeated name, in order. The relative order of different names is not kept.
 ## Publishing
 
 | Method | Signature | Status |
 |---|---|---|
-| `Harken::publish` | `publish(string $topic, string $payload, int $qos = 0, bool $retain = false): PromiseInterface` | stable |
+| `Harken::publish` | `publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface` | stable |
 | `Harken::clearRetained` | `clearRetained(string $topic): PromiseInterface` — empty payload, retain, QoS 1 | stable |
 
 `PromiseInterface` is `React\Promise\PromiseInterface`.
 
-- **Inside the runtime** (handlers, timers, sources): the message goes out on the runtime's own connection. For QoS 1 the promise resolves only after the PUBACK.
+- **Inside the runtime** (handlers, timers, sources): the message goes out on the runtime's own connection. For QoS 1 the promise resolves only after the PUBACK. On MQTT 5 it rejects when the PUBACK carries an error reason code (for example 0x87 not authorized).
 - **Outside the runtime** (HTTP requests, queued jobs, `->queued()` handlers): the message is appended to a Redis stream and the runtime publishes it. The promise resolves once the stream entry is written (`XADD`), not when the broker acknowledges. Delivery is at least once.
 - Publish priority (urgent / normal streams) is **planned**.
 
@@ -94,10 +128,10 @@ The payload stays byte-for-byte identical through queue serialization.
 | Method | Signature | Status |
 |---|---|---|
 | `Harken::fake` | `fake(): HarkenFake` | stable |
-| `Harken::assertPublished` | `assertPublished(string $topic, ?callable $callback = null): void` — callback receives `(string $payload, int $qos, bool $retain)` and returns bool | stable |
+| `Harken::assertPublished` | `assertPublished(string $topic, ?callable $callback = null): void` — callback receives `(string $payload, int $qos, bool $retain, Properties $properties)` and returns bool | stable |
 | `Harken::assertNotPublished` | `assertNotPublished(string $topic, ?callable $callback = null): void` | stable |
 | `Harken::assertNothingPublished` | `assertNothingPublished(): void` | stable |
-| `Harken::simulate` | `simulate(string $topic, string $payload, int $qos = 0, bool $retain = false): void` | stable |
+| `Harken::simulate` | `simulate(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): void` | stable |
 
 `simulate()` sends the message through the same router the runtime uses:
 - Inline handlers run immediately. Their exceptions reach the test instead of being isolated.

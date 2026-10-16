@@ -6,6 +6,7 @@ namespace Whatef\Harken\Laravel\Publishing;
 
 use LogicException;
 use React\Promise\PromiseInterface;
+use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Publisher;
 
 /**
@@ -22,7 +23,7 @@ final readonly class StreamsDelegatePublisher implements Publisher
         public string $stream,
     ) {}
 
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false): PromiseInterface
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
     {
         throw new LogicException('Publishing from outside the Harken runtime is not implemented yet.');
     }

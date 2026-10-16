@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Connection\ConnectionState as State;
 use Whatef\Harken\Runtime\Outbox\OutboxMessage;
 use Whatef\Harken\Runtime\Topic;
@@ -32,6 +33,15 @@ describe('outbox entries', function () {
         expect(OutboxMessage::fromFields($message->toFields()))->toEqual($message);
     });
 
+    it('carries MQTT 5 properties as one JSON field', function () {
+        $properties = new Properties(contentType: 'application/json', correlationData: "\x00\xffid", userProperties: ['k' => ['1', '2']]);
+        $message = new OutboxMessage('cmd/door/1', '{}', 1, false, 1_700_000_000_000, $properties);
+        $fields = $message->toFields();
+
+        expect(OutboxMessage::fromFields($fields))->toEqual($message)
+            ->and(array_key_exists('properties', (new OutboxMessage('a', 'b'))->toFields()))->toBeFalse();
+    });
+
     it('stamps the enqueue time when missing', function () {
         $fields = (new OutboxMessage('a', 'b'))->toFields();
 
@@ -45,6 +55,8 @@ describe('outbox entries', function () {
         [['topic' => '', 'payload' => 'x', 'qos' => '0']],
         [['topic' => 'a', 'qos' => '0']],
         [['topic' => 'a', 'payload' => 'x', 'qos' => '2']],
+        [['topic' => 'a', 'payload' => 'x', 'qos' => '0', 'properties' => '{not json']],
+        [['topic' => 'a', 'payload' => 'x', 'qos' => '0', 'properties' => '{"message_expiry_interval":-1}']],
     ])->throws(UnexpectedValueException::class);
 });
 

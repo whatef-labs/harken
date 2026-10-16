@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whatef\Harken\Laravel;
 
 use React\Promise\PromiseInterface;
+use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Publisher;
 use Whatef\Harken\Runtime\Routing\Route;
 use Whatef\Harken\Runtime\Routing\Router;
@@ -38,13 +39,14 @@ class HarkenManager
     }
 
     /**
+     * @param  Properties|null  $properties  MQTT 5 message properties; dropped on MQTT 3.1.1 connections.
      * @return PromiseInterface<mixed>
      */
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false): PromiseInterface
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
     {
         Topic::assertPublishable($topic, $qos);
 
-        return $this->publisher->publish($topic, $payload, $qos, $retain);
+        return $this->publisher->publish($topic, $payload, $qos, $retain, $properties);
     }
 
     /**

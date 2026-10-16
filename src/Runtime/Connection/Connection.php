@@ -9,6 +9,7 @@ use LogicException;
 use React\EventLoop\LoopInterface;
 use React\Promise\PromiseInterface;
 use Whatef\Harken\Protocol\Codec;
+use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Message;
 use Whatef\Harken\Runtime\Publisher;
 use Whatef\Harken\Transport\Transport;
@@ -85,7 +86,7 @@ final class Connection implements Publisher
      *
      * @return PromiseInterface<void>
      */
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false): PromiseInterface
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
     {
         throw new LogicException(__METHOD__.' is not implemented yet.');
     }
