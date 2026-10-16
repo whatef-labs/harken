@@ -1,0 +1,38 @@
+# Prometheus and Grafana with the Harken dashboard, for local runs and the
+# end-to-end checks next to docker/compose.yml:
+#
+#   docker compose -f docker/monitoring/compose.yml up -d
+#
+# Grafana: http://localhost:3000 (anonymous admin, local use only)
+# Prometheus: http://localhost:9090
+#
+# Both use the host network so they reach runtimes started on the host
+# (harken:start with HARKEN_METRICS_DRIVER=prometheus, ports 9180 and 9181)
+# and the EMQX dashboard port 18083. Host networking needs Linux, or a
+# recent Docker Desktop with host networking enabled. In production, import
+# grafana/dashboards/harken.json into your own Grafana.
+
+name: harken-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    network_mode: host
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.listen-address=:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    network_mode: host
+    environment:
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/harken.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro

@@ -28,6 +28,8 @@ final class PrometheusFormat
         'harken_leader_takeovers_total' => 'Times this replica became leader.',
         'harken_leader_takeover_seconds' => 'From taking the leader lock to the leader connection being subscribed.',
         'harken_leader_gap_seconds' => 'From the previous leader\'s last sign of life to this leader being subscribed.',
+        'harken_leader_last_takeover_seconds' => 'Takeover time of the last time this replica became leader.',
+        'harken_leader_last_gap_seconds' => 'Gap of the last time this replica became leader.',
         'harken_outbox_published_total' => 'Outbox entries published and removed, by stream.',
         'harken_outbox_dropped_total' => 'Outbox entries dropped (malformed or refused by the broker), by stream.',
         'harken_outbox_latency_seconds' => 'From XADD to the broker acknowledging the publish, by stream.',

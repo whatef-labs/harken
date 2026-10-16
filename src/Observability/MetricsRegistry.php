@@ -11,13 +11,13 @@ namespace Whatef\Harken\Observability;
  *
  * Values use base units (seconds, bytes), as Prometheus expects. Leader
  * takeover times get buckets from 50 ms to a minute; every other histogram
- * (handler and publish latencies) gets buckets from 0.5 ms to 5 s.
+ * (handler and publish latencies) gets buckets from 50 µs to 5 s.
  */
 final class MetricsRegistry implements Metrics
 {
-    private const array LATENCY = [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
+    private const array LATENCY = [0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
 
-    private const array TAKEOVER = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60];
+    private const array TAKEOVER = [0.05, 0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 10, 15, 30, 60];
 
     /** @var array<string, array<string, float>> name => label key => value */
     private array $counters = [];
@@ -57,6 +57,17 @@ final class MetricsRegistry implements Metrics
         $histogram['sum'] += $value;
         $histogram['count']++;
         $this->histograms[$name][$key] = $histogram;
+    }
+
+    /**
+     * Creates an empty histogram series, so its first observation shows up
+     * as an increase in Prometheus instead of as the series' first value.
+     *
+     * @param  array<string, string>  $labels
+     */
+    public function declareHistogram(string $name, array $labels = []): void
+    {
+        $this->histograms[$name][$this->key($labels)] ??= ['buckets' => array_fill(0, count(self::buckets($name)), 0), 'sum' => 0.0, 'count' => 0];
     }
 
     /**

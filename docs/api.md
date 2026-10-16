@@ -261,10 +261,13 @@ Metrics are kept per process in memory. Work done outside the runtime (queue wor
 | `harken_leader` | gauge | |
 | `harken_leader_takeovers_total` | counter | |
 | `harken_leader_takeover_seconds`, `harken_leader_gap_seconds` | histogram | |
+| `harken_leader_last_takeover_seconds`, `harken_leader_last_gap_seconds` | gauge | |
 | `harken_outbox_published_total`, `harken_outbox_dropped_total` | counter | `stream` |
 | `harken_outbox_latency_seconds` | histogram | `stream` |
 | `harken_outbox_waiting` | gauge | `stream` |
 | `harken_memory_bytes`, `harken_loop_lag_seconds`, `harken_start_time_seconds` | gauge | |
+
+A ready-made Grafana dashboard is in [`docker/monitoring/grafana/dashboards/harken.json`](../docker/monitoring/grafana/dashboards/harken.json): import it into Grafana with a Prometheus data source, or start Prometheus and Grafana with it already provisioned through `docker compose -f docker/monitoring/compose.yml up -d` (Grafana on port 3000). It shows the leader and replicas, traffic, handlers, the outbox, takeovers, the processes and, when EMQX is scraped too, its dropped deliveries.
 
 A Prometheus scrape job and alerts worth having (the broker exports Prometheus metrics too: EMQX serves them at `/api/v5/prometheus/stats` on its dashboard port, and its `emqx_delivery_dropped_queue_full` belongs on the same dashboard):
 

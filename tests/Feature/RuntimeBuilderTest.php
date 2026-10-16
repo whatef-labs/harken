@@ -259,3 +259,18 @@ it('counts received and published messages for the metrics', function () {
         ->toContain('harken_connected{connection="main"} 1')
         ->toContain('# TYPE harken_start_time_seconds gauge');
 });
+
+it('starts every series at zero so Prometheus sees the first event', function () {
+    config()->set('harken.metrics.driver', 'log');
+    config()->set('harken.outbox.enabled', true);
+    app()->forgetInstance(Metrics::class);
+    built_runtime();
+
+    expect(PrometheusFormat::render(app(MetricsRegistry::class)))
+        ->toContain('harken_leader_takeovers_total 0')
+        ->toContain('harken_handlers_failed_total{route="sensors/{id}/broken"} 0')
+        ->toContain('harken_reconnects_total{connection="leader"} 0')
+        ->toMatch('/harken_outbox_dropped_total{stream="[^"]*harken:outbox:urgent"} 0/')
+        ->toContain('harken_leader_gap_seconds_bucket{le="+Inf"} 0')
+        ->toContain('harken_leader 0');
+});

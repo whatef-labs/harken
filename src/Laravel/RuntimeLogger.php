@@ -223,9 +223,11 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         $this->stats->lastTakeoverSeconds = round($takeoverSeconds, 3);
         $this->stats->lastLeaderGapSeconds = $gapSeconds === null ? null : round($gapSeconds, 3);
         $this->metrics->observe('harken_leader_takeover_seconds', $takeoverSeconds);
+        $this->metrics->gauge('harken_leader_last_takeover_seconds', $takeoverSeconds);
 
         if ($gapSeconds !== null) {
             $this->metrics->observe('harken_leader_gap_seconds', $gapSeconds);
+            $this->metrics->gauge('harken_leader_last_gap_seconds', $gapSeconds);
         }
 
         $this->logger->info('Harken leader is receiving.', [

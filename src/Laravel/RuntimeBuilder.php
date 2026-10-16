@@ -146,6 +146,7 @@ final class RuntimeBuilder
         );
 
         $logger->attach($runtime);
+        $this->declareMetrics($runtime, $router, $notifications);
         $this->harken->usePublisher(new ReportingPublisher($connection, $this->logChannel()));
 
         return $runtime;
@@ -253,6 +254,64 @@ final class RuntimeBuilder
             onError: $logger->error(...),
             guard: $guard,
         );
+    }
+
+    /**
+     * Creates every series the runtime can record at zero. Prometheus cannot
+     * see the increase of a counter whose first sample is already 1, so a
+     * series that appears with the first event (the first takeover, the
+     * first failure of a route) would be missed by increase() and rate().
+     */
+    private function declareMetrics(Runtime $runtime, Router $router, NotificationRouter $notifications): void
+    {
+        $metrics = $this->app->make(Metrics::class);
+
+        if (! $metrics instanceof MetricsRegistry) {
+            return;
+        }
+
+        $metrics->increment('harken_messages_unmatched_total', 0);
+
+        foreach ($router->routes() as $route) {
+            foreach (['harken_messages_handled_total', 'harken_handlers_failed_total', 'harken_handlers_slow_total'] as $name) {
+                $metrics->increment($name, 0, ['route' => $route->pattern->pattern]);
+            }
+        }
+
+        foreach ($notifications->channels() as $channel) {
+            foreach (['harken_notifications_handled_total', 'harken_handlers_failed_total', 'harken_handlers_slow_total'] as $name) {
+                $metrics->increment($name, 0, ['channel' => $channel]);
+            }
+        }
+
+        $connections = ['main'];
+
+        if ($runtime->leadership !== null) {
+            $metrics->gauge('harken_leader', 0);
+            $metrics->increment('harken_leader_takeovers_total', 0);
+            $metrics->declareHistogram('harken_leader_takeover_seconds');
+            $metrics->declareHistogram('harken_leader_gap_seconds');
+
+            if ($router->only(Distribution::Leader)->routes() !== []) {
+                $connections[] = 'leader';
+            }
+        }
+
+        foreach ($connections as $connection) {
+            $metrics->increment('harken_messages_received_total', 0, ['connection' => $connection]);
+            $metrics->increment('harken_reconnects_total', 0, ['connection' => $connection]);
+            $metrics->gauge('harken_connected', 0, ['connection' => $connection]);
+        }
+
+        $metrics->increment('harken_messages_published_total', 0, ['connection' => 'main']);
+
+        if ($runtime->outbox instanceof RedisStreamsOutbox) {
+            foreach ($runtime->outbox->streams as $stream) {
+                $metrics->increment('harken_outbox_published_total', 0, ['stream' => $stream]);
+                $metrics->increment('harken_outbox_dropped_total', 0, ['stream' => $stream]);
+                $metrics->declareHistogram('harken_outbox_latency_seconds', ['stream' => $stream]);
+            }
+        }
     }
 
     /**

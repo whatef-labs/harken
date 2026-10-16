@@ -39,9 +39,15 @@ it('renders counters, gauges and histograms in the Prometheus text format', func
         harken_leader_gap_seconds_bucket{le="0.25"} 0
         harken_leader_gap_seconds_bucket{le="0.5"} 1
         harken_leader_gap_seconds_bucket{le="1"} 1
-        harken_leader_gap_seconds_bucket{le="2.5"} 1
+        harken_leader_gap_seconds_bucket{le="2"} 1
+        harken_leader_gap_seconds_bucket{le="3"} 1
+        harken_leader_gap_seconds_bucket{le="4"} 1
         harken_leader_gap_seconds_bucket{le="5"} 1
+        harken_leader_gap_seconds_bucket{le="6"} 2
+        harken_leader_gap_seconds_bucket{le="7"} 2
+        harken_leader_gap_seconds_bucket{le="8"} 2
         harken_leader_gap_seconds_bucket{le="10"} 2
+        harken_leader_gap_seconds_bucket{le="15"} 2
         harken_leader_gap_seconds_bucket{le="30"} 2
         harken_leader_gap_seconds_bucket{le="60"} 2
         harken_leader_gap_seconds_bucket{le="+Inf"} 2
