@@ -47,7 +47,7 @@ jobs:
         run: vendor/bin/pest --exclude-group=integration
 
   integration:
-    name: Integration (EMQX)
+    name: Integration (EMQX, Redis, PostgreSQL)
     runs-on: ubuntu-latest
     services:
       emqx:
@@ -59,6 +59,23 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: harken
+          POSTGRES_PASSWORD: harken
+          POSTGRES_DB: harken
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U harken"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     steps:
       - uses: actions/checkout@v5
@@ -66,7 +83,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: pcntl, pgsql, sockets
+          extensions: pcntl, pgsql, pdo_pgsql, redis, sockets
           coverage: none
 
       - run: composer update --prefer-dist --no-interaction --no-progress
@@ -78,3 +95,5 @@ jobs:
         run: vendor/bin/pest --group=integration
         env:
           HARKEN_TEST_BROKER_HOST: 127.0.0.1
+          HARKEN_TEST_REDIS_HOST: 127.0.0.1
+          HARKEN_TEST_PG_DSN: host=127.0.0.1 port=5432 dbname=harken user=harken password=harken
