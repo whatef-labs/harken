@@ -55,8 +55,32 @@ afterEach(function () {
         $redis->close();
     }
 
+    // An open connection keeps the loop, and so the test process, alive.
+    foreach (outbox_clients() as $client) {
+        $client->close();
+    }
+
     outbox_opened(reset: true);
+    outbox_clients(reset: true);
 });
+
+/**
+ * @return list<RedisClient>
+ */
+function outbox_clients(?RedisClient $client = null, bool $reset = false): array
+{
+    static $clients = [];
+
+    if ($reset) {
+        $clients = [];
+    }
+
+    if ($client !== null) {
+        $clients[] = $client;
+    }
+
+    return $clients;
+}
 
 /**
  * @return list<RedisStreamsOutbox>
@@ -157,7 +181,10 @@ function outbox(string $consumer = 'c1', int $batch = 100, int $claimIdleMs = 30
     $outbox = new RedisStreamsOutbox($endpoint, $streams, 'harken', $consumer, 200, $batch, $claimIdleMs, null, $observer);
     outbox_opened($outbox);
 
-    return [$outbox, new RedisClient($endpoint, Loop::get()), ...$streams];
+    $redis = new RedisClient($endpoint, Loop::get());
+    outbox_clients($redis);
+
+    return [$outbox, $redis, ...$streams];
 }
 
 function outbox_add(RedisClient $redis, string $stream, OutboxMessage $message): string

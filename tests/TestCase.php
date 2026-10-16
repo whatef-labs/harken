@@ -17,5 +17,8 @@ abstract class TestCase extends Orchestra
     protected function defineEnvironment($app): void
     {
         $app['config']->set('harken.routes', __DIR__.'/Fixtures/routes.php');
+
+        // Independent of a .env the testbench CLI may have left in its skeleton.
+        $app['config']->set('cache.default', 'array');
     }
 }
