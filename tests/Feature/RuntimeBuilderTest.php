@@ -258,6 +258,12 @@ it('counts received and published messages for the metrics', function () {
         ->toContain('harken_leader 1')
         ->toContain('harken_connected{connection="main"} 1')
         ->toContain('# TYPE harken_start_time_seconds gauge');
+
+    // Stopping counts what arrived since the last status, before the metrics reporters stop.
+    $broker->send(new Publish('sensors/3/temperature', 'z'));
+    $runtime->stop('test');
+
+    expect(PrometheusFormat::render(app(MetricsRegistry::class)))->toContain('harken_messages_received_total{connection="leader"} 3');
 });
 
 it('starts every series at zero so Prometheus sees the first event', function () {

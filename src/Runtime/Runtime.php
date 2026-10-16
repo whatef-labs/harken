@@ -153,6 +153,9 @@ final class Runtime
 
         $this->timers = [];
         $this->scheduler->stop();
+        // A last status, so the counters it carries include the final seconds
+        // before the sources (the metrics reporters among them) stop.
+        $this->heartbeat();
 
         foreach ($this->sources as $source) {
             $source->stop();
