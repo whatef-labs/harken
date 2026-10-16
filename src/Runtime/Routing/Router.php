@@ -27,6 +27,25 @@ final class Router
         return $this->routes;
     }
 
+    /**
+     * A router over the routes with one of the given distributions, in
+     * registration order. Each runtime connection dispatches through the
+     * routes it subscribed for, so a message that arrives on two connections
+     * runs each route's handler once.
+     */
+    public function only(Distribution ...$distributions): self
+    {
+        $subset = new self;
+
+        foreach ($this->routes as $route) {
+            if (in_array($route->getDistribution(), $distributions, true)) {
+                $subset->routes[] = $route;
+            }
+        }
+
+        return $subset;
+    }
+
     public function match(string $topic): ?RouteMatch
     {
         foreach ($this->routes as $route) {

@@ -2,13 +2,15 @@
 
 declare(strict_types=1);
 
+use Whatef\Harken\Runtime\Routing\Distribution;
 use Whatef\Harken\Runtime\Routing\Route;
 
-it('defaults to QoS 0, inline, not shared', function () {
+it('defaults to QoS 0, inline, on the leader', function () {
     $route = new Route('a/{id}', 'App\\Handler');
 
     expect($route->getQos())->toBe(0)
         ->and($route->isQueued())->toBeFalse()
+        ->and($route->getDistribution())->toBe(Distribution::Leader)
         ->and($route->getSharedGroup())->toBeNull()
         ->and($route->subscriptionFilter())->toBe('a/+')
         ->and($route->handlerName())->toBe('App\\Handler');
@@ -20,6 +22,17 @@ it('configures fluently', function () {
     expect($route->getQos())->toBe(1)
         ->and($route->isQueued())->toBeTrue()
         ->and($route->subscriptionFilter())->toBe('$share/g1/a/+');
+});
+
+it('picks one distribution, the last one called', function () {
+    $route = new Route('a/{id}', 'App\\Handler');
+
+    expect($route->shared('g')->getDistribution())->toBe(Distribution::Shared)
+        ->and($route->broadcast()->getDistribution())->toBe(Distribution::Broadcast)
+        ->and($route->getSharedGroup())->toBeNull()
+        ->and($route->subscriptionFilter())->toBe('a/+')
+        ->and($route->shared('g')->leader()->getDistribution())->toBe(Distribution::Leader)
+        ->and($route->subscriptionFilter())->toBe('a/+');
 });
 
 it('rejects unsupported QoS levels', function (int $qos) {

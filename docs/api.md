@@ -11,12 +11,15 @@ use App\Mqtt\StatusHandler;
 use App\Mqtt\TemperatureHandler;
 use Whatef\Harken\Facades\Harken;
 
+// Only the elected leader replica subscribes (the default).
 Harken::topic('sensors/{id}/temperature', TemperatureHandler::class)->qos(1);
 
 Harken::topic('sensors/{id}/status', StatusHandler::class)
     ->qos(1)
     ->shared('ingest')   // subscribes to $share/ingest/sensors/+/status
     ->queued();          // runs the handler on a Laravel queue worker
+
+Harken::topic('config/changed', RefreshCache::class)->broadcast(); // every replica
 
 Harken::every(5, fn () => /* sweep pending work */ null);
 ```
@@ -26,7 +29,9 @@ Harken::every(5, fn () => /* sweep pending work */ null);
 | `Harken::topic` | `topic(string $pattern, string\|callable $handler): Route` | stable |
 | `Route::qos` | `qos(int $qos): static` — 0 or 1 (QoS 2 is rejected until supported) | stable |
 | `Route::queued` | `queued(): static` — handler must be a class name | stable |
+| `Route::leader` | `leader(): static` — only the elected leader replica subscribes (default) | stable |
 | `Route::shared` | `shared(string $group): static` — MQTT shared subscription group | stable |
+| `Route::broadcast` | `broadcast(): static` — every replica subscribes | stable |
 | `Harken::every` | `every(int\|float $seconds, callable $callback): void` | stable |
 
 ### Topic patterns
@@ -34,7 +39,21 @@ Harken::every(5, fn () => /* sweep pending work */ null);
 - A level written as `{name}` matches exactly one topic level and is exposed as a route parameter. It is subscribed as `+`.
 - Raw MQTT wildcards are allowed: `+` (one level, unnamed) and `#` (any remaining levels, last position only; `a/#` also matches `a`).
 - Patterns must not start with `$share/`; use `->shared()` instead. Wildcard first levels never match topics that start with `$` (MQTT 3.1.1 §4.7.2).
-- When several routes match one topic, the first registered route wins. Overlapping subscriptions may make the broker deliver a message more than once, so avoid overlaps.
+- When several routes with the same distribution match one topic, the first registered route wins. Overlapping subscriptions may make the broker deliver a message more than once, so avoid overlaps.
+
+### Distribution across replicas
+
+Running several replicas of `harken:start` keeps the runtime available through deployments and crashes. Each route chooses how its messages are spread across them:
+
+| Distribution | Who receives | Fits | Cost |
+|---|---|---|---|
+| `leader()` (default) | the elected leader only; the others stand by | handlers that keep per-source state in memory (replay checks, ordering) | one process carries the whole inbound load; a few seconds without a subscriber when the leader changes |
+| `shared('group')` | one replica per message (`$share/group/…`) | handlers where every message is independent | messages from one source are handled by different processes |
+| `broadcast()` | every replica | refreshing a per-process cache or setting | the work is repeated on every replica |
+
+- Publishing is not affected: every replica publishes, whatever the distribution of its routes.
+- **Shared.** Brokers can pin a source to one member (EMQX `hash_clientid` / `hash_topic`), but the assignment changes whenever the number of replicas changes, and EMQX has a single strategy for the whole broker. Harken does not rely on it.
+- A message that matches a leader route and a broadcast route arrives on both connections of the leader replica; each route's handler runs once.
 
 ## Handlers
 
@@ -55,6 +74,8 @@ final class TemperatureHandler
 ```
 
 Handlers that are **not** queued run inline on the event loop and must not block. Inside them, `await()` and other Fiber suspension are not allowed. Handlers that take longer than `harken.handlers.slow_threshold_ms` are logged.
+
+Ordering: inline handlers of one connection run one at a time, in the order the broker delivered the messages, so a leader route sees every message in order in a single process. `->queued()` handlers run on queue workers and may run out of order and in parallel; keep order-sensitive or per-source state in an inline handler and queue only the work that follows from it.
 
 ### `Whatef\Harken\Runtime\Message` — stable
 
