@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Support\Str;
+
 return [
 
     /*
@@ -29,7 +31,9 @@ return [
     |
     | When client_id is empty, a unique id is generated per process as
     | "{prefix}-{hostname}-{pid}-{random}" so replicas started from the same
-    | configuration do not kick each other off the broker. Set an explicit
+    | configuration do not kick each other off the broker. The prefix
+    | defaults to the application name, so applications sharing a broker do
+    | not collide. Set an explicit
     | client_id only for a single process that needs a persistent session
     | (clean_session = false); on MQTT 5, session_expiry then sets how many
     | seconds the broker keeps that session while the process is away.
@@ -46,7 +50,7 @@ return [
             'port' => (int) env('HARKEN_PORT', 1883),
             'protocol' => env('HARKEN_PROTOCOL', '5.0'),
             'client_id' => env('HARKEN_CLIENT_ID'),
-            'client_id_prefix' => env('HARKEN_CLIENT_ID_PREFIX', 'harken'),
+            'client_id_prefix' => env('HARKEN_CLIENT_ID_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-harken'),
             'username' => env('HARKEN_USERNAME'),
             'password' => env('HARKEN_PASSWORD'),
             'keepalive' => (int) env('HARKEN_KEEPALIVE', 60),
@@ -72,6 +76,25 @@ return [
                 'multiplier' => 2.0,
                 'jitter' => 0.5,
                 'max_attempts' => null,
+            ],
+
+            /*
+             * Leader routes (the default distribution) are received by one
+             * elected replica on a second connection with a fixed client id
+             * and a persistent session, so the broker queues QoS 1 messages
+             * while the leader changes. The lock is "redis" (a connection in
+             * config/database.php redis), "pgsql" (a database connection;
+             * PostgreSQL 14+ and ext-pgsql) or "none" (single replica only).
+             * A standby replica takes over within the lease after a crash,
+             * and within retry_interval after a graceful stop.
+             */
+            'leader' => [
+                'client_id' => env('HARKEN_LEADER_CLIENT_ID'), // default: "{client_id_prefix}-leader"
+                'session_expiry' => (int) env('HARKEN_LEADER_SESSION_EXPIRY', 300),
+                'lock' => env('HARKEN_LEADER_LOCK', 'redis'),
+                'lock_connection' => env('HARKEN_LEADER_LOCK_CONNECTION'), // default: "default" (redis), "pgsql" (pgsql)
+                'lease' => (float) env('HARKEN_LEADER_LEASE', 5),
+                'retry_interval' => 0.25,
             ],
         ],
 

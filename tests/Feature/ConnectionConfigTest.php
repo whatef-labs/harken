@@ -16,7 +16,7 @@ it('builds options from the default config block', function () {
 
     expect($options->endpoint->uri())->toBe('tcp://127.0.0.1:1883')
         ->and($options->endpoint->tls)->toBeNull()
-        ->and($options->clientId)->toStartWith('harken-')
+        ->and($options->clientId)->toStartWith('laravel-harken-')
         ->and($options->keepAlive)->toBe(60)
         ->and($options->cleanSession)->toBeTrue()
         ->and($options->protocol)->toBe(ProtocolVersion::V5_0)

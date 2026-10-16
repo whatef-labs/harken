@@ -39,8 +39,8 @@ beforeEach(function () {
     }
 });
 
-// A connection left running keeps timers on the global loop, which ReactPHP
-// would otherwise run forever at shutdown after a failed test.
+// A connection left running after a failed test keeps sockets and timers on
+// the global loop, and every later await() would keep serving them.
 afterEach(function () {
     foreach (it_connections() as $connection) {
         $connection->abort();
@@ -48,8 +48,6 @@ afterEach(function () {
 
     it_connections(reset: true);
 });
-
-afterAll(fn () => Loop::stop());
 
 /**
  * @return list<Connection>

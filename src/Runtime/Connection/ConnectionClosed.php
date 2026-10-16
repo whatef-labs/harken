@@ -16,7 +16,7 @@ use Whatef\Harken\Protocol\ReasonCode;
  * Harken closed the connection over a protocol error or a keepalive timeout.
  * $beforeConnAck tells that the broker closed the connection without
  * answering CONNECT, which some brokers do for a protocol version they do
- * not support.
+ * not support. $guarded tells that the connection's guard stopped it.
  */
 final class ConnectionClosed extends RuntimeException
 {
@@ -25,6 +25,7 @@ final class ConnectionClosed extends RuntimeException
         public readonly ?ReasonCode $reasonCode = null,
         ?Throwable $previous = null,
         public readonly bool $beforeConnAck = false,
+        public readonly bool $guarded = false,
     ) {
         parent::__construct($message, $reasonCode === null ? 0 : $reasonCode->value, $previous);
     }
@@ -74,7 +75,7 @@ final class ConnectionClosed extends RuntimeException
 
     public static function guarded(): self
     {
-        return new self('The connection was closed because its guard no longer allows it to run.');
+        return new self('The connection was closed because its guard no longer allows it to run.', guarded: true);
     }
 
     public function isSessionTakenOver(): bool

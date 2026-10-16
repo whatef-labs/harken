@@ -52,6 +52,9 @@ Running several replicas of `harken:start` keeps the runtime available through d
 | `broadcast()` | every replica | refreshing a per-process cache or setting | the work is repeated on every replica |
 
 - Publishing is not affected: every replica publishes, whatever the distribution of its routes.
+- **Leader.** The leader holds a lease (Redis by default) and opens a second connection with a fixed client id, clean start off and a session expiry, so the broker keeps queuing QoS 1 messages while the leader changes and the next leader receives them. Two processes can never receive on that client id at once: the broker closes the older connection, and a leader whose lease ran out closes its connection before handling another message. QoS 0 messages sent while no leader is connected are lost. The broker bounds the queue of a disconnected session (EMQX: `mqtt.max_mqueue_len`, 1000 by default) and drops QoS 1 messages beyond it without telling anyone, so size it for the inbound rate times the takeover time.
+  - Settings live under `leader` in each connection of `config/harken.php`: the lock (`redis` by default, `pgsql` for a PostgreSQL 14+ advisory lock with ext-pgsql, or `none` for a single replica), the lease (5 s), the retry interval (0.25 s) and the session expiry (300 s). The leader client id defaults to `{client_id_prefix}-leader`; the prefix defaults to the application name.
+  - A standby replica takes over within the lease after a crash, and within the retry interval after a graceful stop, because a stopping leader releases the lock at once.
 - **Shared.** Brokers can pin a source to one member (EMQX `hash_clientid` / `hash_topic`), but the assignment changes whenever the number of replicas changes, and EMQX has a single strategy for the whole broker. Harken does not rely on it.
 - A message that matches a leader route and a broadcast route arrives on both connections of the leader replica; each route's handler runs once.
 
