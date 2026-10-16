@@ -2,23 +2,17 @@
 
 declare(strict_types=1);
 
-use React\EventLoop\ExtUvLoop;
-use React\EventLoop\Loop;
+use Whatef\Harken\Runtime\LoopFactory;
 use Whatef\Harken\Tests\Pulse\PulseTestCase;
 use Whatef\Harken\Tests\TestCase;
 
 pest()->extend(TestCase::class)->in('Feature', 'Integration');
 
-// ExtUvLoop schedules timers from libuv's cached time, which only moves while
-// the loop runs. After a test that ran no loop for a while (blocking sockets,
-// sleeps), a timeout the next test sets would already be due; bring the time
-// up to date first.
+// Integration tests run on the loop the runtime uses. On ext-uv its timers
+// count from when they are added, not from libuv's clock as of the last loop
+// iteration, which stands still while a test runs blocking code.
 pest()->group('integration')->beforeEach(function (): void {
-    $loop = Loop::get();
-
-    if ($loop instanceof ExtUvLoop) {
-        uv_update_time($loop->getUvLoop());
-    }
+    LoopFactory::get();
 })->in('Integration');
 
 pest()->extend(PulseTestCase::class)->in('Pulse');

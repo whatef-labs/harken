@@ -8,3 +8,5 @@ parameters:
     tmpDir: build/phpstan
     bootstrapFiles:
         - tests/phpstan-bootstrap.php
+    scanFiles:
+        - tests/phpstan-ext-uv.php
