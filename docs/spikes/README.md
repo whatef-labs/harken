@@ -22,7 +22,12 @@ Cross-cutting findings:
 
 ### 1. MQTT 5 in the first release?
 
-**No.** EMQX 5 serves shared subscriptions to MQTT 3.1.1 clients (spike 02), which was the main reason to pull MQTT 5 in early. The codec sits behind `Codec`, packets are Harken's own value objects and `Message::$properties` already exists, so an MQTT 5 codec can be added later without API changes. Latency metrics can use the enqueue timestamp the outbox entries already carry.
+**Not required, but decided: yes.** EMQX 5 serves shared subscriptions to MQTT 3.1.1 clients (spike 02), so scaling out does not depend on MQTT 5, and the spike recommendation was to defer it. MQTT 5 ships in the first release anyway, for what 3.1.1 cannot express:
+- reason codes on CONNACK, PUBACK, SUBACK and DISCONNECT, so a refused publish or subscription is reported instead of being indistinguishable from success or a dropped connection;
+- message expiry, user properties, content type and request/response properties;
+- limits the broker announces (Receive Maximum, Maximum Packet Size, Server Keep Alive), which the outbox window and keepalive must follow.
+
+MQTT 3.1.1 stays fully supported. The protocol version is chosen per connection, and `->shared()` uses the same `$share/<group>/<filter>` form on both. The codec sits behind `Codec`, packets are Harken's own value objects and `Message::$properties` already exists, so the MQTT 5 codec is added next to the 3.1.1 one.
 
 ### 2. Default acknowledgement policy for inbound QoS 1
 
