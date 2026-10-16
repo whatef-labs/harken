@@ -7,6 +7,7 @@ namespace Whatef\Harken\Laravel;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Contracts\Events\Dispatcher as Events;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Log\LogManager;
 use Illuminate\Support\ServiceProvider;
@@ -17,6 +18,7 @@ use Whatef\Harken\Laravel\Console\RestartCommand;
 use Whatef\Harken\Laravel\Console\StartCommand;
 use Whatef\Harken\Laravel\Console\StatusCommand;
 use Whatef\Harken\Laravel\Publishing\StreamsDelegatePublisher;
+use Whatef\Harken\Laravel\Queue\FailedMessageStore;
 use Whatef\Harken\Observability\LogContext;
 use Whatef\Harken\Observability\Metrics;
 use Whatef\Harken\Observability\MetricsRegistry;
@@ -84,8 +86,16 @@ final class HarkenServiceProvider extends ServiceProvider
                 new LogContext((bool) $config->get('harken.logging.log_payloads', false)),
                 $app->make(Metrics::class),
                 $app->make(ExceptionHandler::class),
+                $app->make(Events::class),
+                $config->get('harken.handlers.failed_jobs', false) ? $app->make(FailedMessageStore::class) : null,
             );
         };
+
+        $this->app->bind(FailedMessageStore::class, fn (): FailedMessageStore => new FailedMessageStore(
+            $this->app->make('queue.failer'),
+            $this->app,
+            $this->app->make(Config::class),
+        ));
 
         $this->app->bind(DispatchObserver::class, $observer);
         $this->app->bind(NotificationObserver::class, $observer);

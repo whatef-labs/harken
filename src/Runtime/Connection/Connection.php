@@ -118,6 +118,8 @@ final class Connection implements Publisher
 
     private bool $holdingInbound = false;
 
+    private ?Throwable $lastError = null;
+
     private int $receivedCount = 0;
 
     private int $publishedCount = 0;
@@ -416,6 +418,15 @@ final class Connection implements Publisher
         return $this->publishedCount;
     }
 
+    /**
+     * Why the connection last failed or ended, until it connects again.
+     * State listeners can read it while handling the transition.
+     */
+    public function lastError(): ?Throwable
+    {
+        return $this->lastError;
+    }
+
     public function inFlightCount(): int
     {
         return count($this->inFlight);
@@ -576,6 +587,7 @@ final class Connection implements Publisher
         }
 
         $this->limits = BrokerLimits::fromConnAck($ack);
+        $this->lastError = null;
         $this->sessionPresent = $ack->sessionPresent;
         $this->failedAttempts = 0;
         $this->connects++;
@@ -854,6 +866,7 @@ final class Connection implements Publisher
         $this->dropSocket();
         $this->disconnectedAt = microtime(true);
         $this->failedAttempts++;
+        $this->lastError = $reason;
         $this->report($reason);
 
         if (! $this->options->backoff->allows($this->failedAttempts)) {
@@ -889,6 +902,7 @@ final class Connection implements Publisher
         }
 
         $wasActive = $this->state !== ConnectionState::Disconnected;
+        $this->lastError = $reason;
         $this->dropSocket();
 
         if ($wasActive) {

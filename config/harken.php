@@ -121,10 +121,18 @@ return [
     | threshold is logged, because it delays every other message, timer and
     | publish in the process. Move such handlers to the queue with ->queued().
     |
+    | A failing handler is logged, reported and announced with a
+    | MessageHandlerFailed event; the message is still acknowledged. With
+    | failed_jobs on, the message is also stored in the queue's failed job
+    | store (class handlers only), so `php artisan queue:retry` can run the
+    | handler again on a queue worker. This also catches ->queued() jobs
+    | that could not be pushed onto the queue.
+    |
     */
 
     'handlers' => [
         'slow_threshold_ms' => (int) env('HARKEN_SLOW_HANDLER_MS', 100),
+        'failed_jobs' => (bool) env('HARKEN_FAILED_JOBS', false),
     ],
 
     /*

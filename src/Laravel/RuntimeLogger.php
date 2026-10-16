@@ -6,8 +6,10 @@ namespace Whatef\Harken\Laravel;
 
 use Closure;
 use Illuminate\Contracts\Cache\Repository as Cache;
+use Illuminate\Contracts\Events\Dispatcher as Events;
 use Psr\Log\LoggerInterface;
 use Throwable;
+use Whatef\Harken\Events\ConnectionStateChanged;
 use Whatef\Harken\Laravel\Console\RestartCommand;
 use Whatef\Harken\Observability\Metrics;
 use Whatef\Harken\Runtime\Connection\ConnectionState;
@@ -55,6 +57,7 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         private readonly HealthStore $health,
         private readonly Cache $restartCache,
         ?callable $console = null,
+        private readonly ?Events $events = null,
     ) {
         $this->console = $console === null ? null : $console(...);
     }
@@ -72,10 +75,16 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         return $this->failure;
     }
 
-    public function connectionState(string $connection, ConnectionState $from, ConnectionState $to): void
+    public function connectionState(string $connection, string $clientId, ConnectionState $from, ConnectionState $to, ?Throwable $error = null): void
     {
         $labels = ['connection' => $connection];
         $this->metrics->gauge('harken_connected', $to === ConnectionState::Connected ? 1 : 0, $labels);
+
+        try {
+            $this->events?->dispatch(new ConnectionStateChanged($connection, $clientId, $from, $to, $to === ConnectionState::Connected ? null : $error));
+        } catch (Throwable $e) {
+            $this->error($e);
+        }
 
         if ($to !== ConnectionState::Connected) {
             return;

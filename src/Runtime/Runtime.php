@@ -56,6 +56,8 @@ final class Runtime
     /** @var (Closure(int): void)|null */
     private ?Closure $signalHandler = null;
 
+    private bool $signalReceived = false;
+
     /**
      * @param  list<Source>  $sources  Sources every replica runs (leader-only sources follow the election).
      */
@@ -313,17 +315,56 @@ final class Runtime
         }
     }
 
+    /**
+     * SIGTERM, SIGINT and SIGTSTP (ext-pcntl), or Ctrl+C and Ctrl+Break on
+     * Windows, stop the runtime gracefully. The same signal again while it is
+     * stopping ends the process at once.
+     */
     private function installSignals(): void
     {
-        if (! $this->options->handleSignals || ! extension_loaded('pcntl') || ! defined('SIGTERM')) {
+        if (! $this->options->handleSignals) {
             return;
         }
 
-        $this->signalHandler = function (int $signal): void {
-            $this->stop($signal === SIGINT ? 'SIGINT' : 'SIGTERM');
-        };
-        $this->loop->addSignal(SIGTERM, $this->signalHandler);
-        $this->loop->addSignal(SIGINT, $this->signalHandler);
+        if (extension_loaded('pcntl') && defined('SIGTERM')) {
+            $handler = $this->signalHandler = function (int $signal): void {
+                $this->signalled(match ($signal) {
+                    SIGINT => 'SIGINT',
+                    SIGTSTP => 'SIGTSTP',
+                    default => 'SIGTERM',
+                });
+            };
+
+            foreach ([SIGTERM, SIGINT, SIGTSTP] as $signal) {
+                $this->loop->addSignal($signal, $handler);
+            }
+
+            return;
+        }
+
+        if (PHP_OS_FAMILY === 'Windows' && function_exists('sapi_windows_set_ctrl_handler')) {
+            $this->signalHandler = function (int $event): void {
+                $this->signalled($event === PHP_WINDOWS_EVENT_CTRL_BREAK ? 'CTRL+BREAK' : 'CTRL+C');
+            };
+            sapi_windows_set_ctrl_handler($this->signalHandler);
+        }
+    }
+
+    /**
+     * Signal handlers run asynchronously (ReactPHP enables async signals),
+     * possibly in the middle of a handler. The stop is therefore only
+     * scheduled here and starts once the current callback has returned.
+     */
+    private function signalled(string $signal): void
+    {
+        if ($this->signalReceived) {
+            $this->observer->stopped("{$signal} again while stopping", 1);
+
+            exit(1);
+        }
+
+        $this->signalReceived = true;
+        $this->loop->futureTick(fn () => $this->stop($signal));
     }
 
     private function removeSignals(): void
@@ -332,8 +373,14 @@ final class Runtime
             return;
         }
 
-        $this->loop->removeSignal(SIGTERM, $this->signalHandler);
-        $this->loop->removeSignal(SIGINT, $this->signalHandler);
+        if (extension_loaded('pcntl') && defined('SIGTERM')) {
+            foreach ([SIGTERM, SIGINT, SIGTSTP] as $signal) {
+                $this->loop->removeSignal($signal, $this->signalHandler);
+            }
+        } elseif (function_exists('sapi_windows_set_ctrl_handler')) {
+            sapi_windows_set_ctrl_handler($this->signalHandler, false);
+        }
+
         $this->signalHandler = null;
     }
 }

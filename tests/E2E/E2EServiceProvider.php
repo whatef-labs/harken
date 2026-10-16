@@ -42,8 +42,11 @@ final class E2EServiceProvider extends ServiceProvider
         $blockMs = (int) (getenv('E2E_HANDLER_MS') ?: 0);
 
         $route = Harken::topic($topic, static function (Message $message) use ($log, $blockMs): void {
-            if ($blockMs > 0) {
-                usleep($blockMs * 1000);
+            // Busy, not sleeping: a blocking call that signals do not cut short.
+            $until = microtime(true) + $blockMs / 1000;
+
+            while (microtime(true) < $until) {
+                // block the loop
             }
 
             file_put_contents($log, sprintf("%d %s %.6f\n", getmypid(), $message->payload, microtime(true)), FILE_APPEND | LOCK_EX);

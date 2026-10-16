@@ -217,11 +217,23 @@ harken:
     interval: 10s
 ```
 
-- **Graceful stop.** SIGTERM or SIGINT (with ext-pcntl), `harken:restart`, `--memory` and `--max-time` stop the runtime in this order, within `harken.shutdown.grace` seconds: stop timers and NOTIFY sources, hold inbound messages (unacknowledged QoS 1 messages are delivered again after the connection closes), stop leading (DISCONNECT and release the lock, so a standby replica takes over at once), let the outbox finish the entries in flight, wait for the last PUBACKs, then DISCONNECT. The exit code is 0, so the process manager starts a fresh process. A failure the runtime cannot recover from (credentials refused, a subscription refused, the client id taken over) exits with 1.
+- **Graceful stop.** SIGTERM, SIGINT or SIGTSTP (with ext-pcntl), Ctrl+C or Ctrl+Break on Windows, `harken:restart`, `--memory` and `--max-time` stop the runtime in this order, within `harken.shutdown.grace` seconds: stop timers and NOTIFY sources, hold inbound messages (unacknowledged QoS 1 messages are delivered again after the connection closes), stop leading (DISCONNECT and release the lock, so a standby replica takes over at once), let the outbox finish the entries in flight, wait for the last PUBACKs, then DISCONNECT. A signal that arrives while a handler runs starts the stop once the handler returns; a second signal while stopping ends the process at once with exit code 1. The exit code of a graceful stop is 0, so the process manager starts a fresh process. A failure the runtime cannot recover from (credentials refused, a subscription refused, the client id taken over) exits with 1.
 - **Restart for a deployment.** `php artisan harken:restart` sets a flag in the cache; every runtime started before it stops within `harken.restart_check_interval` seconds.
 - **Health.** Every runtime writes a heartbeat (connection state, leader state, outbox, counters, memory, loop lag) to the cache every `harken.health.interval` seconds. `harken:status` checks the runtimes on its own host: it fails when none runs, when a heartbeat is older than `harken.health.stale_after` seconds, or when the broker connection has been down that long. A stale heartbeat of a process that a newer one on the same host replaced is ignored. Use a cache store that every process can read (Redis, database, file on a shared disk).
 - **Logs.** Life cycle, connection, election and outbox events go to the `harken.logging.channel` log channel; credentials and payloads are never logged.
 - **HTTP endpoint.** With `HARKEN_HTTP=true` (or the `prometheus` metrics driver) every runtime process answers `GET /health` on `harken.http.host`:`harken.http.port` (default `0.0.0.0:9180`): 200 with its status as JSON while healthy, 503 otherwise. It suits probes that speak HTTP, such as Kubernetes; `harken:status` remains the command for a container health check.
+
+## Events
+
+The runtime dispatches Laravel events. Listeners run on the event loop, inside the runtime process: keep them short, or make them queued (`ShouldQueue`). An exception in a listener is reported and does not stop the runtime.
+
+| Event | When | Properties |
+|---|---|---|
+| `Whatef\Harken\Events\ConnectionStateChanged` | a broker connection changes state (`disconnected`, `connecting`, `connected`, `reconnecting`, `stopping`) | `connection` (`main` or `leader`), `clientId`, `from`, `to` (`ConnectionState`), `error` (why it left the connected state, or null) |
+| `Whatef\Harken\Events\MessageHandlerFailed` | an inline handler threw, or a `->queued()` job could not be pushed | `route`, `message`, `exception`, `failedJobId` |
+| `Whatef\Harken\Events\NotificationHandlerFailed` | the same for a NOTIFY handler | `route`, `notification`, `exception`, `failedJobId` |
+
+A failed message is still acknowledged, so it is not delivered again. With `HARKEN_FAILED_JOBS=true` (`harken.handlers.failed_jobs`) it is also stored in the queue's failed job store as the job that runs the same handler, and `failedJobId` names the entry: `php artisan queue:retry <id>` then runs the handler again on a queue worker, with the same message bytes. This works for class handlers (closures cannot be stored) and also catches `->queued()` jobs that could not be pushed because the queue was unreachable.
 
 ## Metrics
 

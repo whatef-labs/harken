@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Contracts\Events\Dispatcher as Events;
 use Illuminate\Log\LogManager;
 use Psr\Log\LoggerInterface;
 use React\EventLoop\LoopInterface;
@@ -155,7 +156,7 @@ final class RuntimeBuilder
         $connection = new Connection($options, $transport, $options->protocol->codec(), $loop);
         $connection->subscribe($routes->subscriptions());
         $connection->onError(fn ($e) => $logger->connectionError($role, $e));
-        $connection->onStateChange(fn (ConnectionState $from, ConnectionState $to) => $logger->connectionState($role, $from, $to));
+        $connection->onStateChange(fn (ConnectionState $from, ConnectionState $to) => $logger->connectionState($role, $options->clientId, $from, $to, $connection->lastError()));
 
         if ($this->trace !== null) {
             $trace = $this->trace;
@@ -350,6 +351,7 @@ final class RuntimeBuilder
             new HealthStore($cache->store(is_string($store) && $store !== '' ? $store : null), (int) $this->float('harken.health.stale_after', 30.0)),
             $cache->store(),
             $this->console,
+            $this->app->make(Events::class),
         );
     }
 
