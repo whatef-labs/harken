@@ -34,3 +34,13 @@ it('selects the tls scheme only when TLS is configured', function () {
 it('hides the key passphrase when dumped', function () {
     expect(print_r(new TlsOptions(passphrase: 'hunter2'), true))->not->toContain('hunter2');
 });
+
+it('knows when the endpoint host needs no DNS lookup', function (string $host, bool $ip) {
+    expect((new Endpoint($host))->hostIsIp())->toBe($ip);
+})->with([
+    ['127.0.0.1', true],
+    ['::1', true],
+    ['[::1]', true],
+    ['broker.lan', false],
+    ['localhost', false],
+]);

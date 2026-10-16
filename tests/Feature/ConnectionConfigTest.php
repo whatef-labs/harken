@@ -7,6 +7,9 @@ use Whatef\Harken\Observability\LogContext;
 use Whatef\Harken\Protocol\Binsoul\BinsoulCodec;
 use Whatef\Harken\Protocol\Mqtt5\Mqtt5Codec;
 use Whatef\Harken\Protocol\ProtocolVersion;
+use Whatef\Harken\Protocol\ReasonCode;
+use Whatef\Harken\Runtime\Connection\ConnectionClosed;
+use Whatef\Harken\Runtime\Connection\ConnectionRefused;
 
 it('builds options from the default config block', function () {
     $options = ConnectionConfig::options('default', config('harken.connections.default'));
@@ -62,3 +65,22 @@ it('selects the codec from the protocol', function (string $protocol, string $co
 it('rejects unsupported protocols', function (mixed $protocol) {
     ConnectionConfig::options('default', ['host' => 'h', 'protocol' => $protocol]);
 })->with(['3.1', '5', 5.0])->throws(InvalidArgumentException::class, 'use "5.0" or "3.1.1"');
+
+it('reads the MQTT 5 session expiry and the nameserver', function () {
+    $options = ConnectionConfig::options('default', ['host' => 'broker.lan', 'session_expiry' => '300', 'dns' => '10.0.0.53']);
+
+    expect($options->sessionExpiry)->toBe(300)
+        ->and($options->endpoint->nameserver)->toBe('10.0.0.53')
+        ->and(ConnectionConfig::options('default', config('harken.connections.default'))->sessionExpiry)->toBe(0);
+});
+
+it('names the protocol setting when a broker refuses MQTT 5', function () {
+    $options = ConnectionConfig::options('edge', ['host' => 'h']);
+
+    expect(ConnectionConfig::hint(new ConnectionRefused(ReasonCode::UnsupportedProtocolVersion, ProtocolVersion::V5_0), $options))
+        ->toBe('The broker does not accept MQTT 5. Set HARKEN_PROTOCOL=3.1.1 (harken.connections.edge.protocol) to connect with MQTT 3.1.1.')
+        ->and(ConnectionConfig::hint(ConnectionClosed::beforeConnAck(), $options))
+        ->toBe('If the broker does not support MQTT 5, set HARKEN_PROTOCOL=3.1.1 (harken.connections.edge.protocol).')
+        ->and(ConnectionConfig::hint(new ConnectionRefused(ReasonCode::NotAuthorized, ProtocolVersion::V5_0), $options))->toBeNull()
+        ->and(ConnectionConfig::hint(ConnectionClosed::beforeConnAck(), ConnectionConfig::options('edge', ['host' => 'h', 'protocol' => '3.1.1'])))->toBeNull();
+});

@@ -21,6 +21,9 @@ final class ReactSocketTransport implements Transport
         $connector = new Connector([
             'timeout' => $endpoint->connectTimeout,
             'tls' => $endpoint->tls?->toStreamContext() ?? [],
+            // Reading the system DNS configuration is a blocking call (and shells
+            // out on Windows), so skip it when there is nothing to resolve.
+            'dns' => $endpoint->hostIsIp() ? false : ($endpoint->nameserver ?? true),
         ], $this->loop);
 
         return $connector->connect($endpoint->uri());

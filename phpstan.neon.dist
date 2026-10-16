@@ -12,6 +12,4 @@ parameters:
         -
             identifier: property.onlyWritten
             paths:
-                - src/Runtime/Connection/Connection.php
-                - src/Runtime/Keepalive.php
                 - src/Runtime/Sources/PgNotifySource.php

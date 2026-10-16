@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace Whatef\Harken\Laravel;
 
 use InvalidArgumentException;
+use Throwable;
 use Whatef\Harken\Protocol\ProtocolVersion;
+use Whatef\Harken\Protocol\ReasonCode;
 use Whatef\Harken\Runtime\ClientId;
+use Whatef\Harken\Runtime\Connection\ConnectionClosed;
 use Whatef\Harken\Runtime\Connection\ConnectionOptions;
+use Whatef\Harken\Runtime\Connection\ConnectionRefused;
 use Whatef\Harken\Runtime\Reconnect\ExponentialBackoff;
 use Whatef\Harken\Transport\Endpoint;
 use Whatef\Harken\Transport\TlsOptions;
@@ -53,6 +57,7 @@ final class ConnectionConfig
                 port: self::int($config, 'port', 1883),
                 tls: ($tls['enabled'] ?? false) ? TlsOptions::fromArray($tls) : null,
                 connectTimeout: is_numeric($config['connect_timeout'] ?? null) ? (float) $config['connect_timeout'] : 5.0,
+                nameserver: self::nullableString($config, 'dns'),
             ),
             clientId: is_string($clientId) && $clientId !== ''
                 ? $clientId
@@ -63,7 +68,31 @@ final class ConnectionConfig
             username: self::nullableString($config, 'username'),
             password: self::nullableString($config, 'password'),
             protocol: $version,
+            sessionExpiry: self::int($config, 'session_expiry', 0),
         );
+    }
+
+    /**
+     * What to change in the configuration when a connection error points at
+     * a setting, or null.
+     */
+    public static function hint(Throwable $error, ConnectionOptions $options): ?string
+    {
+        if ($options->protocol !== ProtocolVersion::V5_0) {
+            return null;
+        }
+
+        $setting = "HARKEN_PROTOCOL=3.1.1 (harken.connections.{$options->name}.protocol)";
+
+        if ($error instanceof ConnectionRefused && $error->reasonCode === ReasonCode::UnsupportedProtocolVersion) {
+            return "The broker does not accept MQTT 5. Set {$setting} to connect with MQTT 3.1.1.";
+        }
+
+        if ($error instanceof ConnectionClosed && $error->beforeConnAck) {
+            return "If the broker does not support MQTT 5, set {$setting}.";
+        }
+
+        return null;
     }
 
     /**

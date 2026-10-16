@@ -25,11 +25,17 @@ return [
     | protocol is the MQTT version this connection speaks: "5.0" (default) or
     | "3.1.1". The broker serves each client in the version it connected
     | with, so devices on 3.1.1 and Harken on 5.0 can share a broker. A
-    | broker without MQTT 5 refuses the connection at startup. When client_id is empty, a unique id is generated per
-    | process as "{prefix}-{hostname}-{pid}-{random}" so replicas started from
-    | the same configuration do not kick each other off the broker. Set an
-    | explicit client_id only for a single process that needs a persistent
-    | session (clean_session = false).
+    | broker without MQTT 5 refuses the connection at startup.
+    |
+    | When client_id is empty, a unique id is generated per process as
+    | "{prefix}-{hostname}-{pid}-{random}" so replicas started from the same
+    | configuration do not kick each other off the broker. Set an explicit
+    | client_id only for a single process that needs a persistent session
+    | (clean_session = false); on MQTT 5, session_expiry then sets how many
+    | seconds the broker keeps that session while the process is away.
+    |
+    | dns is the nameserver used to resolve host; empty uses the system
+    | configuration. It is not used when host is an IP address.
     |
     */
 
@@ -45,7 +51,9 @@ return [
             'password' => env('HARKEN_PASSWORD'),
             'keepalive' => (int) env('HARKEN_KEEPALIVE', 60),
             'clean_session' => (bool) env('HARKEN_CLEAN_SESSION', true),
+            'session_expiry' => (int) env('HARKEN_SESSION_EXPIRY', 0),
             'connect_timeout' => 5.0,
+            'dns' => env('HARKEN_DNS'),
 
             'tls' => [
                 'enabled' => (bool) env('HARKEN_TLS', false),
