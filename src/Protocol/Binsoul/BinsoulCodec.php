@@ -34,6 +34,7 @@ use Whatef\Harken\Protocol\Packet\Unsubscribe;
 use Whatef\Harken\Protocol\ProtocolException;
 use Whatef\Harken\Protocol\ProtocolVersion;
 use Whatef\Harken\Protocol\ReasonCode;
+use Whatef\Harken\Protocol\Wire\Framer;
 
 /**
  * MQTT 3.1.1 codec backed by binsoul/net-mqtt packet classes.
@@ -65,9 +66,9 @@ final class BinsoulCodec implements Codec
         }
     }
 
-    public function decoder(): Decoder
+    public function decoder(int $maximumPacketSize = Framer::PROTOCOL_MAXIMUM): Decoder
     {
-        return new BinsoulDecoder($this);
+        return new BinsoulDecoder($this, new Framer($maximumPacketSize));
     }
 
     /**
