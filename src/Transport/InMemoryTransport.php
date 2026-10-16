@@ -65,6 +65,14 @@ final class InMemoryTransport implements Transport
         return $this->peers[$last];
     }
 
+    /**
+     * The broker side of the connection opened as number $index (0-based).
+     */
+    public function peerAt(int $index): InMemoryConnection
+    {
+        return $this->peers[$index] ?? throw new LogicException("No connection #{$index} was opened.");
+    }
+
     public function connectionCount(): int
     {
         return count($this->peers);

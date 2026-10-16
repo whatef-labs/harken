@@ -116,6 +116,12 @@ final class Connection implements Publisher
 
     private bool $finished = false;
 
+    private bool $holdingInbound = false;
+
+    private int $receivedCount = 0;
+
+    private int $publishedCount = 0;
+
     private ?TimerInterface $retryTimer = null;
 
     private ?TimerInterface $responseTimer = null;
@@ -208,6 +214,18 @@ final class Connection implements Publisher
     public function guard(callable $guard): void
     {
         $this->guard = $guard(...);
+    }
+
+    /**
+     * Stops handling inbound messages while the connection stays up for
+     * publishing, for example while a stopping runtime waits for its last
+     * PUBACKs. Held QoS 1 messages are not acknowledged, so the broker
+     * delivers them again (to the session, or to another shared
+     * subscription member) once this connection closes.
+     */
+    public function holdInbound(): void
+    {
+        $this->holdingInbound = true;
     }
 
     /**
@@ -379,6 +397,23 @@ final class Connection implements Publisher
     public function reconnects(): int
     {
         return max(0, $this->connects - 1);
+    }
+
+    /**
+     * Inbound messages handed to the listener since the process started.
+     */
+    public function receivedCount(): int
+    {
+        return $this->receivedCount;
+    }
+
+    /**
+     * Publishes written to the socket since the process started (QoS 1
+     * counted once, not per resend).
+     */
+    public function publishedCount(): int
+    {
+        return $this->publishedCount;
     }
 
     public function inFlightCount(): int
@@ -638,7 +673,12 @@ final class Connection implements Publisher
             return;
         }
 
+        if ($this->holdingInbound) {
+            return;
+        }
+
         $socket = $this->socket;
+        $this->receivedCount++;
 
         if ($this->onMessage !== null) {
             try {
@@ -767,6 +807,7 @@ final class Connection implements Publisher
         }
 
         $this->socket?->write($bytes);
+        $this->publishedCount++;
 
         if ($id === null) {
             $outbound->deferred->resolve(null);

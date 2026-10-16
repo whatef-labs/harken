@@ -42,7 +42,7 @@ it('starts without routes when the routes file is missing', function () {
 it('signals restarts through the cache', function () {
     $this->artisan('harken:restart')->assertSuccessful();
 
-    expect(Cache::get(RestartCommand::CACHE_KEY))->toBeInt();
+    expect(Cache::get(RestartCommand::CACHE_KEY))->toBeFloat();
 });
 
 it('fails to start on an unknown connection', function () {

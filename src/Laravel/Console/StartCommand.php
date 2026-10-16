@@ -8,18 +8,19 @@ use Illuminate\Console\Command;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Container\Container;
 use InvalidArgumentException;
+use React\EventLoop\LoopInterface;
+use ReflectionClass;
+use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Whatef\Harken\Laravel\ConnectionConfig;
 use Whatef\Harken\Laravel\HarkenManager;
-use Whatef\Harken\Runtime\Connection\Connection;
-use Whatef\Harken\Runtime\Connection\ConnectionOptions;
+use Whatef\Harken\Laravel\LeaderConfig;
+use Whatef\Harken\Laravel\RuntimeBuilder;
+use Whatef\Harken\Protocol\Packet\Packet;
 use Whatef\Harken\Runtime\LoopFactory;
-use Whatef\Harken\Runtime\Routing\Dispatcher;
-use Whatef\Harken\Runtime\Routing\DispatchObserver;
-use Whatef\Harken\Runtime\Routing\HandlerInvoker;
-use Whatef\Harken\Runtime\Runtime;
-use Whatef\Harken\Runtime\Shutdown\ShutdownSequence;
-use Whatef\Harken\Transport\ReactSocketTransport;
+use Whatef\Harken\Runtime\Routing\Distribution;
+use Whatef\Harken\Runtime\Routing\Route;
+use Whatef\Harken\Transport\Transport;
 
 #[AsCommand(name: 'harken:start')]
 final class StartCommand extends Command
@@ -27,7 +28,7 @@ final class StartCommand extends Command
     /** @var string */
     protected $signature = 'harken:start
         {--connection= : The broker connection to use}
-        {--debug : Print packet-level logs}
+        {--debug : Print every MQTT packet}
         {--memory= : Stop gracefully after using this many megabytes}
         {--max-time= : Stop gracefully after running this many seconds}';
 
@@ -45,70 +46,110 @@ final class StartCommand extends Command
             return self::FAILURE;
         }
 
+        /** @var array<string, mixed> $connection */
         try {
-            /** @var array<string, mixed> $connection */
-            $options = ConnectionConfig::options($name, $connection);
+            // Validate early; the runtime builds its own options (and client id).
+            ConnectionConfig::options($name, $connection);
+            $leaderRoutes = $harken->router()->only(Distribution::Leader)->routes() !== [] || $harken->notifications()->only(Distribution::Leader)->routes() !== [];
+            $leader = $leaderRoutes ? LeaderConfig::options($connection) : null;
         } catch (InvalidArgumentException $e) {
             $this->components->error($e->getMessage());
 
             return self::FAILURE;
         }
 
-        $router = $harken->router();
+        $this->warnings($harken, $config);
 
-        if ($router->routes() === []) {
-            $this->components->warn('No routes are registered; nothing will be subscribed.');
+        $builder = new RuntimeBuilder($container, $config, $harken);
+        $builder->console(function (string $level, string $line): void {
+            match ($level) {
+                'error' => $this->components->error($line),
+                'warn' => $this->components->warn($line),
+                default => $this->components->info($line),
+            };
+        });
+
+        if ($this->option('debug')) {
+            $builder->trace(fn (string $where, Packet $packet) => $this->line(sprintf(
+                '<fg=gray>%s</> %-12s %s',
+                date('H:i:s'),
+                $where,
+                (new ReflectionClass($packet))->getShortName(),
+            )));
         }
 
-        if ($router->hasQueuedRoutes() && $config->get('queue.default') === 'sync') {
-            $this->components->warn(
-                'Queued routes run inline because the default queue connection is [sync]; they will block the event loop.'
+        $loop = $container->make(LoopInterface::class);
+
+        try {
+            $runtime = $builder->build(
+                $name,
+                $connection,
+                $loop,
+                $container->make(Transport::class),
+                is_numeric($this->option('memory')) ? (int) $this->option('memory') : null,
+                is_numeric($this->option('max-time')) ? (float) $this->option('max-time') : null,
             );
+        } catch (InvalidArgumentException|RuntimeException $e) {
+            $this->components->error($e->getMessage());
+
+            return self::FAILURE;
         }
 
+        $options = $runtime->connection->options;
         $this->components->info(sprintf(
             'Starting Harken on %s as [%s] (MQTT %s, %s).',
             $options->endpoint->uri(),
             $options->clientId,
             $options->protocol->value,
-            LoopFactory::backend(),
+            LoopFactory::backend($loop),
         ));
 
-        if ($this->option('debug')) {
-            $this->table(
-                ['Pattern', 'Subscription', 'QoS', 'Handler', 'Queued'],
-                array_map(static fn ($route): array => [
-                    $route->pattern->pattern,
-                    $route->subscriptionFilter(),
-                    $route->getQos(),
-                    $route->handlerName(),
-                    $route->isQueued() ? 'yes' : 'no',
-                ], $router->routes()),
-            );
+        if ($leader !== null) {
+            $this->components->twoColumnDetail('Leader routes', sprintf('lock %s, client id [%s], lease %s s', $leader->lock, $leader->clientId, $leader->lease));
         }
 
-        return $this->runtime($options, $harken, $config, $container)->run();
+        if ($this->option('debug')) {
+            $this->routes($harken);
+        }
+
+        $exitCode = $runtime->run();
+        $failure = $runtime->failure();
+        $hint = $failure === null ? null : ConnectionConfig::hint($failure, $options);
+
+        if ($hint !== null) {
+            $this->components->warn($hint);
+        }
+
+        return $exitCode;
     }
 
-    private function runtime(ConnectionOptions $options, HarkenManager $harken, Config $config, Container $container): Runtime
+    private function warnings(HarkenManager $harken, Config $config): void
     {
-        $loop = LoopFactory::get();
-        $connection = new Connection($options, new ReactSocketTransport($loop), $options->protocol->codec(), $loop);
-        $threshold = $config->get('harken.handlers.slow_threshold_ms', 100);
-        $grace = $config->get('harken.shutdown.grace', 10);
+        $router = $harken->router();
 
-        return new Runtime(
-            loop: $loop,
-            connection: $connection,
-            router: $harken->router(),
-            dispatcher: new Dispatcher(
-                $harken->router(),
-                $container->make(HandlerInvoker::class),
-                $container->make(DispatchObserver::class),
-                is_numeric($threshold) ? (float) $threshold : 100.0,
-            ),
-            scheduler: $harken->scheduler(),
-            shutdown: new ShutdownSequence(is_numeric($grace) ? (float) $grace : 10.0),
+        if ($router->routes() === [] && $harken->notifications()->routes() === []) {
+            $this->components->warn('No routes are registered; nothing will be subscribed.');
+        }
+
+        if (($router->hasQueuedRoutes() || $harken->notifications()->hasQueuedRoutes()) && $config->get('queue.default') === 'sync') {
+            $this->components->warn(
+                'Queued routes run inline because the default queue connection is [sync]; they will block the event loop.'
+            );
+        }
+    }
+
+    private function routes(HarkenManager $harken): void
+    {
+        $this->table(
+            ['Pattern', 'Subscription', 'Distribution', 'QoS', 'Handler', 'Queued'],
+            array_map(static fn (Route $route): array => [
+                $route->pattern->pattern,
+                $route->subscriptionFilter(),
+                $route->getDistribution()->value,
+                $route->getQos(),
+                $route->handlerName(),
+                $route->isQueued() ? 'yes' : 'no',
+            ], $harken->router()->routes()),
         );
     }
 }

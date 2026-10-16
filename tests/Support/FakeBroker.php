@@ -32,6 +32,8 @@ final class FakeBroker
 
     private ?InMemoryConnection $current = null;
 
+    private ?int $pinned = null;
+
     public function __construct(private readonly Codec $codec)
     {
         $this->transport = new InMemoryTransport;
@@ -117,6 +119,17 @@ final class FakeBroker
         return $subscribe;
     }
 
+    /**
+     * Talk to the connection opened as number $index from now on, instead of
+     * the most recent one. null goes back to following the most recent.
+     */
+    public function use(?int $index): self
+    {
+        $this->pinned = $index;
+
+        return $this;
+    }
+
     public function connections(): int
     {
         return $this->transport->connectionCount();
@@ -134,7 +147,7 @@ final class FakeBroker
 
     private function peer(): InMemoryConnection
     {
-        $peer = $this->transport->peer();
+        $peer = $this->pinned === null ? $this->transport->peer() : $this->transport->peerAt($this->pinned);
 
         if ($peer !== $this->current) {
             $this->current = $peer;

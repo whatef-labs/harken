@@ -642,3 +642,24 @@ it('sends urgent publishes ahead of others waiting for the Receive Maximum', fun
         ->and($second->topic)->toBe('door/open')
         ->and($connection->queuedCount())->toBe(2);
 });
+
+it('holds inbound messages without acknowledging them while it keeps publishing', function () {
+    [$connection, $broker] = connection();
+    $handled = 0;
+    $connection->onMessage(function () use (&$handled) {
+        $handled++;
+    });
+    $connection->connect();
+    $broker->accept();
+
+    $connection->holdInbound();
+    $broker->send(new Publish('a', 'x', 1, packetId: 4));
+    $published = $connection->publish('b', 'y', 1);
+    $sent = $broker->received();
+    $broker->send(new PubAck($sent[0]->packetId));
+
+    expect($handled)->toBe(0)
+        ->and($sent)->toHaveCount(1)
+        ->and($sent[0])->toBeInstanceOf(Publish::class)
+        ->and(settled($published)['state'])->toBe('fulfilled');
+});

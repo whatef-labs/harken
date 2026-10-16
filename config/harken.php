@@ -146,6 +146,7 @@ return [
     */
 
     'outbox' => [
+        'enabled' => (bool) env('HARKEN_OUTBOX', true),
         'redis' => env('HARKEN_OUTBOX_REDIS', 'default'),
         'streams' => [
             'urgent' => 'harken:outbox:urgent',

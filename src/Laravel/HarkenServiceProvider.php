@@ -11,6 +11,7 @@ use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Log\LogManager;
 use Illuminate\Support\ServiceProvider;
 use Psr\Log\LoggerInterface;
+use React\EventLoop\LoopInterface;
 use Whatef\Harken\Laravel\Console\RestartCommand;
 use Whatef\Harken\Laravel\Console\StartCommand;
 use Whatef\Harken\Laravel\Console\StatusCommand;
@@ -18,12 +19,15 @@ use Whatef\Harken\Laravel\Publishing\StreamsDelegatePublisher;
 use Whatef\Harken\Observability\LogContext;
 use Whatef\Harken\Observability\Metrics;
 use Whatef\Harken\Observability\NullMetrics;
+use Whatef\Harken\Runtime\LoopFactory;
 use Whatef\Harken\Runtime\Routing\DispatchObserver;
 use Whatef\Harken\Runtime\Routing\HandlerInvoker;
 use Whatef\Harken\Runtime\Routing\Router;
 use Whatef\Harken\Runtime\Sources\NotificationInvoker;
 use Whatef\Harken\Runtime\Sources\NotificationObserver;
 use Whatef\Harken\Runtime\Timers\Scheduler;
+use Whatef\Harken\Transport\ReactSocketTransport;
+use Whatef\Harken\Transport\Transport;
 
 final class HarkenServiceProvider extends ServiceProvider
 {
@@ -55,9 +59,10 @@ final class HarkenServiceProvider extends ServiceProvider
         $this->app->singleton(Metrics::class, NullMetrics::class);
         $this->app->bind(HandlerInvoker::class, ContainerHandlerInvoker::class);
         $this->app->bind(NotificationInvoker::class, ContainerHandlerInvoker::class);
-        $this->app->bind(NotificationObserver::class, DispatchObserver::class);
+        $this->app->bind(LoopInterface::class, static fn (): LoopInterface => LoopFactory::get());
+        $this->app->bind(Transport::class, static fn (Container $app): Transport => new ReactSocketTransport($app->make(LoopInterface::class)));
 
-        $this->app->bind(DispatchObserver::class, static function (Container $app): DispatchObserver {
+        $observer = static function (Container $app): LoggingDispatchObserver {
             $config = $app->make(Config::class);
             $channel = $config->get('harken.logging.channel');
 
@@ -69,7 +74,10 @@ final class HarkenServiceProvider extends ServiceProvider
                 $app->make(Metrics::class),
                 $app->make(ExceptionHandler::class),
             );
-        });
+        };
+
+        $this->app->bind(DispatchObserver::class, $observer);
+        $this->app->bind(NotificationObserver::class, $observer);
     }
 
     public function boot(): void

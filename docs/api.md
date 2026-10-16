@@ -197,10 +197,28 @@ Each connection in `config/harken.php` sets `protocol` (`HARKEN_PROTOCOL`): `5.0
 
 | Command | Options | Status |
 |---|---|---|
-| `harken:start` | `--connection=` `--debug` `--memory=` (MB) `--max-time=` (seconds) | draft |
-| `harken:restart` | — | draft |
-| `harken:status` | — | planned |
+| `harken:start` | `--connection=` `--debug` (print every MQTT packet) `--memory=` (MB) `--max-time=` (seconds) | stable |
+| `harken:restart` | — | stable |
+| `harken:status` | `--all` (every host) `--json`; exits 1 when a runtime on this host is unhealthy | stable |
 
+## Running
+
+`harken:start` runs in the foreground; run it under a process manager or as a container, next to `queue:work` or Horizon and Reverb:
+
+```yaml
+harken:
+  image: my-app
+  command: php artisan harken:start
+  stop_grace_period: 15s
+  healthcheck:
+    test: ["CMD", "php", "artisan", "harken:status"]
+    interval: 10s
+```
+
+- **Graceful stop.** SIGTERM or SIGINT (with ext-pcntl), `harken:restart`, `--memory` and `--max-time` stop the runtime in this order, within `harken.shutdown.grace` seconds: stop timers and NOTIFY sources, hold inbound messages (unacknowledged QoS 1 messages are delivered again after the connection closes), stop leading (DISCONNECT and release the lock, so a standby replica takes over at once), let the outbox finish the entries in flight, wait for the last PUBACKs, then DISCONNECT. The exit code is 0, so the process manager starts a fresh process. A failure the runtime cannot recover from (credentials refused, a subscription refused, the client id taken over) exits with 1.
+- **Restart for a deployment.** `php artisan harken:restart` sets a flag in the cache; every runtime started before it stops within `harken.restart_check_interval` seconds.
+- **Health.** Every runtime writes a heartbeat (connection state, leader state, outbox, counters, memory, loop lag) to the cache every `harken.health.interval` seconds. `harken:status` checks the runtimes on its own host: it fails when none runs, when a heartbeat is older than `harken.health.stale_after` seconds, or when the broker connection has been down that long. A stale heartbeat of a process that a newer one on the same host replaced is ignored. Use a cache store that every process can read (Redis, database, file on a shared disk).
+- **Logs and metrics.** Life cycle, connection, election and outbox events go to the `harken.logging.channel` log channel; credentials and payloads are never logged. Metrics go to the `Whatef\Harken\Observability\Metrics` binding (null by default).
 ## Planned
 
 - Per-route acknowledgement policy for QoS 1 (`ack after handler`).
