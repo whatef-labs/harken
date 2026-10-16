@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\ServiceProvider;
 use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Runtime\Message;
+use Whatef\Harken\Tests\E2E\Load\DeviceReport;
+use Whatef\Harken\Tests\E2E\Load\SlowReport;
 
 /**
  * Routes for end-to-end runs. Every message on E2E_TOPIC is appended to the
@@ -22,6 +24,18 @@ final class E2EServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
+        if (getenv('E2E_MODE') === 'load') {
+            // load.php: light reports inline; slow reports inline or queued (E2E_SLOW).
+            Harken::topic('load/{id}/up', DeviceReport::class)->qos(1);
+            $slow = Harken::topic('load/{id}/slow', SlowReport::class)->qos(1);
+
+            if (getenv('E2E_SLOW') === 'queued') {
+                $slow->queued();
+            }
+
+            return;
+        }
+
         $topic = (string) (getenv('E2E_TOPIC') ?: 'harken-e2e/+/up');
         $log = (string) (getenv('E2E_LOG') ?: sys_get_temp_dir().'/harken-e2e.log');
         $blockMs = (int) (getenv('E2E_HANDLER_MS') ?: 0);
