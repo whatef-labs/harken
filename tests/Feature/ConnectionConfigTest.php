@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 use Whatef\Harken\Laravel\ConnectionConfig;
 use Whatef\Harken\Observability\LogContext;
+use Whatef\Harken\Protocol\Binsoul\BinsoulCodec;
+use Whatef\Harken\Protocol\Mqtt5\Mqtt5Codec;
+use Whatef\Harken\Protocol\ProtocolVersion;
 
 it('builds options from the default config block', function () {
     $options = ConnectionConfig::options('default', config('harken.connections.default'));
@@ -13,6 +16,7 @@ it('builds options from the default config block', function () {
         ->and($options->clientId)->toStartWith('harken-')
         ->and($options->keepAlive)->toBe(60)
         ->and($options->cleanSession)->toBeTrue()
+        ->and($options->protocol)->toBe(ProtocolVersion::V5_0)
         ->and($options->username)->toBeNull();
 });
 
@@ -45,6 +49,16 @@ it('enables TLS and credentials', function () {
         ->and(json_encode(LogContext::redact(config('harken.connections.default'))))->not->toContain('hunter2');
 });
 
-it('rejects unsupported protocols', function () {
-    ConnectionConfig::options('default', ['host' => 'h', 'protocol' => '5.0']);
-})->throws(InvalidArgumentException::class, 'not supported yet');
+it('selects the codec from the protocol', function (string $protocol, string $codec) {
+    $options = ConnectionConfig::options('default', ['host' => 'h', 'protocol' => $protocol]);
+
+    expect($options->protocol->value)->toBe($protocol)
+        ->and($options->protocol->codec())->toBeInstanceOf($codec);
+})->with([
+    ['5.0', Mqtt5Codec::class],
+    ['3.1.1', BinsoulCodec::class],
+]);
+
+it('rejects unsupported protocols', function (mixed $protocol) {
+    ConnectionConfig::options('default', ['host' => 'h', 'protocol' => $protocol]);
+})->with(['3.1', '5', 5.0])->throws(InvalidArgumentException::class, 'use "5.0" or "3.1.1"');

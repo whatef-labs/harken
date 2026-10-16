@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whatef\Harken\Laravel;
 
 use InvalidArgumentException;
+use Whatef\Harken\Protocol\ProtocolVersion;
 use Whatef\Harken\Runtime\ClientId;
 use Whatef\Harken\Runtime\Connection\ConnectionOptions;
 use Whatef\Harken\Runtime\Reconnect\ExponentialBackoff;
@@ -27,10 +28,15 @@ final class ConnectionConfig
             throw new InvalidArgumentException("Harken connection [{$name}] needs a host.");
         }
 
-        $protocol = $config['protocol'] ?? '3.1.1';
+        $protocol = $config['protocol'] ?? ProtocolVersion::V5_0->value;
+        $version = is_string($protocol) ? ProtocolVersion::tryFrom($protocol) : null;
 
-        if ($protocol !== '3.1.1') {
-            throw new InvalidArgumentException("Harken connection [{$name}]: protocol [{$protocol}] is not supported yet.");
+        if ($version === null) {
+            throw new InvalidArgumentException(sprintf(
+                'Harken connection [%s]: protocol [%s] is not supported; use "5.0" or "3.1.1".',
+                $name,
+                is_scalar($protocol) ? $protocol : get_debug_type($protocol),
+            ));
         }
 
         $tls = is_array($config['tls'] ?? null) ? $config['tls'] : [];
@@ -56,6 +62,7 @@ final class ConnectionConfig
             cleanSession: (bool) ($config['clean_session'] ?? true),
             username: self::nullableString($config, 'username'),
             password: self::nullableString($config, 'password'),
+            protocol: $version,
         );
     }
 

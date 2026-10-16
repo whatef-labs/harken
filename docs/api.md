@@ -138,6 +138,10 @@ User properties keep every value of a repeated name, in order. The relative orde
 - `->queued()` handlers are dispatched as jobs, so `Queue::fake()` / `Bus::fake()` can assert on them.
 - A topic that matches no route is ignored, as in the runtime.
 
+## Protocol version
+
+Each connection in `config/harken.php` sets `protocol` (`HARKEN_PROTOCOL`): `5.0` (default) or `3.1.1`. The client picks the version when it connects and the broker serves every client in its own version, so devices on 3.1.1 and Harken on 5.0 can share a broker. There is no automatic fallback: a broker without MQTT 5 refuses the connection at startup, and the error names the setting to change.
+
 ## Artisan
 
 | Command | Options | Status |

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whatef\Harken\Runtime\Connection;
 
 use SensitiveParameter;
+use Whatef\Harken\Protocol\ProtocolVersion;
 use Whatef\Harken\Runtime\Reconnect\Backoff;
 use Whatef\Harken\Transport\Endpoint;
 
@@ -19,6 +20,7 @@ final readonly class ConnectionOptions
         public bool $cleanSession = true,
         public ?string $username = null,
         #[SensitiveParameter] public ?string $password = null,
+        public ProtocolVersion $protocol = ProtocolVersion::V5_0,
     ) {}
 
     /**

@@ -11,7 +11,6 @@ use InvalidArgumentException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Whatef\Harken\Laravel\ConnectionConfig;
 use Whatef\Harken\Laravel\HarkenManager;
-use Whatef\Harken\Protocol\Binsoul\BinsoulCodec;
 use Whatef\Harken\Runtime\Connection\Connection;
 use Whatef\Harken\Runtime\Connection\ConnectionOptions;
 use Whatef\Harken\Runtime\LoopFactory;
@@ -68,9 +67,10 @@ final class StartCommand extends Command
         }
 
         $this->components->info(sprintf(
-            'Starting Harken on %s as [%s] (%s).',
+            'Starting Harken on %s as [%s] (MQTT %s, %s).',
             $options->endpoint->uri(),
             $options->clientId,
+            $options->protocol->value,
             LoopFactory::backend(),
         ));
 
@@ -93,7 +93,7 @@ final class StartCommand extends Command
     private function runtime(ConnectionOptions $options, HarkenManager $harken, Config $config, Container $container): Runtime
     {
         $loop = LoopFactory::get();
-        $connection = new Connection($options, new ReactSocketTransport($loop), new BinsoulCodec, $loop);
+        $connection = new Connection($options, new ReactSocketTransport($loop), $options->protocol->codec(), $loop);
         $threshold = $config->get('harken.handlers.slow_threshold_ms', 100);
         $grace = $config->get('harken.shutdown.grace', 10);
 

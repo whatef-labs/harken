@@ -20,7 +20,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | Each runtime process holds one connection and uses it to both subscribe
-    | and publish. When client_id is empty, a unique id is generated per
+    | and publish.
+    |
+    | protocol is the MQTT version this connection speaks: "5.0" (default) or
+    | "3.1.1". The broker serves each client in the version it connected
+    | with, so devices on 3.1.1 and Harken on 5.0 can share a broker. A
+    | broker without MQTT 5 refuses the connection at startup. When client_id is empty, a unique id is generated per
     | process as "{prefix}-{hostname}-{pid}-{random}" so replicas started from
     | the same configuration do not kick each other off the broker. Set an
     | explicit client_id only for a single process that needs a persistent
@@ -33,7 +38,7 @@ return [
         'default' => [
             'host' => env('HARKEN_HOST', '127.0.0.1'),
             'port' => (int) env('HARKEN_PORT', 1883),
-            'protocol' => '3.1.1',
+            'protocol' => env('HARKEN_PROTOCOL', '5.0'),
             'client_id' => env('HARKEN_CLIENT_ID'),
             'client_id_prefix' => env('HARKEN_CLIENT_ID_PREFIX', 'harken'),
             'username' => env('HARKEN_USERNAME'),
