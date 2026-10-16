@@ -13,7 +13,9 @@ use SensitiveParameter;
  *
  * Planned: with ext-pgsql, the connection socket from pg_socket() is watched
  * with addReadStream() and notifications are drained with pg_get_notify().
- * Without ext-pgsql it falls back to polling on a timer.
+ * Without ext-pgsql it falls back to polling on a timer every
+ * $pollIntervalMs milliseconds; this is the only place the runtime waits on
+ * a fixed interval rather than on socket readiness.
  *
  * Skeleton: shaped by spike 04.
  */
@@ -27,6 +29,7 @@ final class PgNotifySource implements Source
         #[SensitiveParameter] private readonly string $dsn,
         public readonly array $channels,
         private readonly mixed $onNotify,
+        public readonly int $pollIntervalMs = 10,
     ) {}
 
     public function name(): string

@@ -35,7 +35,7 @@
 
 ## Design consequences for `PgNotifySource`
 
-- Driver selection: the `pg_socket()` path when ext-pgsql is loaded; otherwise `Pdo\Pgsql` polling with a configurable interval (default 100 ms), with a startup log line naming the active driver.
+- Driver selection: the `pg_socket()` path when ext-pgsql is loaded; otherwise `Pdo\Pgsql` polling every `harken.sources.pgsql.poll_interval_ms` (default **10 ms**, ≈0.4 % of a core idle on Linux per E4), with a startup log line naming the active driver. The runtime never waits on a fixed 100 ms tick by default; this fallback is the only fixed interval in it.
 - A dedicated connection, never shared with Eloquent, that `LISTEN`s on every configured channel after each (re)connect.
 - On read failure: `removeReadStream()` → reconnect with the same `ExponentialBackoff` → `LISTEN` → emit a "resync" event to handlers.
 - Handlers receive `(string $channel, string $payload)` and run inline with the same isolation and slow-handler reporting as MQTT handlers.

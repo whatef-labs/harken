@@ -118,6 +118,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Event Sources
+    |--------------------------------------------------------------------------
+    |
+    | The runtime has no idle tick to tune. The event loop waits on its
+    | sockets and timers and wakes as soon as one of them is ready, so a
+    | broker message, an outbox entry or a notification is handled at once.
+    |
+    | PostgreSQL LISTEN/NOTIFY is watched the same way when ext-pgsql is
+    | loaded. Without it, the source polls through PDO every
+    | poll_interval_ms milliseconds.
+    |
+    */
+
+    'sources' => [
+        'pgsql' => [
+            'poll_interval_ms' => (int) env('HARKEN_PGSQL_POLL_MS', 10),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Process Lifecycle
     |--------------------------------------------------------------------------
     |

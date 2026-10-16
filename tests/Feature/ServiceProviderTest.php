@@ -11,6 +11,7 @@ it('merges the package configuration', function () {
     expect(config('harken.default'))->toBe('default')
         ->and(config('harken.connections.default.port'))->toBe(1883)
         ->and(config('harken.handlers.slow_threshold_ms'))->toBe(100)
+        ->and(config('harken.sources.pgsql.poll_interval_ms'))->toBe(10)
         ->and(config('harken.logging.log_payloads'))->toBeFalse();
 });
 

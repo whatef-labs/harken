@@ -13,6 +13,7 @@ Cross-cutting findings:
 
 - **EMQX session queues drop silently.** QoS 1 deliveries beyond `max_inflight` + `max_mqueue_len` (32 + 1000 by default) are dropped and only counted in `delivery.dropped.queue_full`. The outbox must drain at a bounded rate, and deployments should size the queue and alert on that metric.
 - **Dead streams kill the loop.** A stream that fails inside its read callback must be removed from the loop in that callback; `StreamSelectLoop` throws on an unselectable stream and stops everything.
+- **No idle tick.** The loop sleeps in `stream_select` / libuv until a socket is ready or the next timer is due, so there is no "sleep N ms when idle" setting to tune: an outbox entry, a broker message or a NOTIFY wakes it immediately (spikes 01, 03, 04). The PDO polling fallback of the PostgreSQL source is the only fixed interval and defaults to 10 ms.
 - **Windows timer floor.** Timers and `stream_select` timeouts on Windows resolve to about 15.6 ms; socket readiness does not. Windows is fine for development, but latency is measured on Linux.
 - **DNS on Windows 11.** `react/dns` system config discovery shells out to `wmic`, which is gone, and falls back to `8.8.8.8`. The transport should skip DNS for IP literals and allow a configured nameserver.
 - **ext-uv** made no measurable difference at this socket count; it stays an optional, automatically used backend.
