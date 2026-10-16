@@ -33,6 +33,7 @@ use Whatef\Harken\Protocol\Packet\UnsubAck;
 use Whatef\Harken\Protocol\Packet\Unsubscribe;
 use Whatef\Harken\Protocol\ProtocolException;
 use Whatef\Harken\Protocol\ProtocolVersion;
+use Whatef\Harken\Protocol\ReasonCode;
 
 /**
  * MQTT 3.1.1 codec backed by binsoul/net-mqtt packet classes.
@@ -43,6 +44,10 @@ use Whatef\Harken\Protocol\ProtocolVersion;
  *
  * Both directions are mapped so the same codec can drive an in-memory broker
  * double in tests. QoS 2 packets are not mapped yet.
+ *
+ * CONNACK and SUBACK return codes are mapped to their MQTT 5 reason codes.
+ * MQTT 5 only fields (properties, other reason codes) are dropped on encode
+ * and left at their defaults on decode.
  */
 final class BinsoulCodec implements Codec
 {
@@ -56,7 +61,7 @@ final class BinsoulCodec implements Codec
         try {
             return (string) $this->toBinsoul($packet);
         } catch (InvalidArgumentException $e) {
-            throw new ProtocolException($e->getMessage(), 0, $e);
+            throw new ProtocolException($e->getMessage(), previous: $e);
         }
     }
 
@@ -80,10 +85,10 @@ final class BinsoulCodec implements Codec
                 packetId: $packet->getIdentifier(),
             ),
             $packet instanceof PublishAckPacket => new PubAck($this->identifier($packet->getIdentifier())),
-            $packet instanceof ConnectResponsePacket => new ConnAck($packet->getReturnCode(), $packet->isSessionPresent()),
+            $packet instanceof ConnectResponsePacket => new ConnAck(self::connAckReason($packet->getReturnCode()), $packet->isSessionPresent()),
             $packet instanceof SubscribeResponsePacket => new SubAck(
                 $this->identifier($packet->getIdentifier()),
-                array_values($packet->getReturnCodes()),
+                self::subAckReasons($packet->getReturnCodes()),
             ),
             $packet instanceof UnsubscribeResponsePacket => new UnsubAck($this->identifier($packet->getIdentifier())),
             $packet instanceof PingResponsePacket => new PingResp,
@@ -177,7 +182,7 @@ final class BinsoulCodec implements Codec
 
             case $packet instanceof ConnAck:
                 $out = new ConnectResponsePacket;
-                $out->setReturnCode(self::connAckCode($packet->returnCode));
+                $out->setReturnCode(self::connAckReturnCode($packet->reasonCode));
                 $out->setSessionPresent($packet->sessionPresent);
 
                 return $out;
@@ -185,7 +190,7 @@ final class BinsoulCodec implements Codec
             case $packet instanceof SubAck:
                 $out = new SubscribeResponsePacket;
                 $out->setIdentifier($packet->packetId);
-                $out->setReturnCodes(array_map(self::subAckCode(...), $packet->returnCodes));
+                $out->setReturnCodes(array_map(self::subAckReturnCode(...), $packet->reasonCodes));
 
                 return $out;
 
@@ -239,27 +244,67 @@ final class BinsoulCodec implements Codec
     }
 
     /**
-     * @return int<0, 255>
+     * MQTT 3.1.1 CONNACK return codes (§3.2.2.3) and their MQTT 5 equivalents.
      */
-    private static function connAckCode(int $code): int
+    private const array CONNACK_CODES = [
+        0 => ReasonCode::Success,
+        1 => ReasonCode::UnsupportedProtocolVersion,
+        2 => ReasonCode::ClientIdentifierNotValid,
+        3 => ReasonCode::ServerUnavailable,
+        4 => ReasonCode::BadUserNameOrPassword,
+        5 => ReasonCode::NotAuthorized,
+    ];
+
+    private static function connAckReason(int $code): ReasonCode
     {
-        if ($code < 0 || $code > 255) {
-            throw self::outOfRange('CONNACK return code', $code, 0, 255);
+        return self::CONNACK_CODES[$code] ?? throw new ProtocolException("Invalid CONNACK return code [{$code}].");
+    }
+
+    /**
+     * @return int<0, 5>
+     */
+    private static function connAckReturnCode(ReasonCode $reason): int
+    {
+        $code = array_search($reason, self::CONNACK_CODES, true);
+
+        if ($code === false) {
+            throw new ProtocolException("Reason code {$reason->describe()} has no MQTT 3.1.1 CONNACK equivalent.");
         }
 
         return $code;
     }
 
     /**
-     * @return int<0, 128>
+     * @param  array<int, int>  $codes
+     * @return non-empty-list<ReasonCode>
      */
-    private static function subAckCode(int $code): int
+    private static function subAckReasons(array $codes): array
     {
-        if ($code < 0 || $code > 128) {
-            throw self::outOfRange('SUBACK return code', $code, 0, 128);
+        $reasons = array_map(static fn (int $code): ReasonCode => match ($code) {
+            0, 1, 2 => ReasonCode::from($code),
+            0x80 => ReasonCode::UnspecifiedError,
+            default => throw new ProtocolException("Invalid SUBACK return code [{$code}]."),
+        }, array_values($codes));
+
+        if ($reasons === []) {
+            throw new ProtocolException('SUBACK without return codes.');
         }
 
-        return $code;
+        return $reasons;
+    }
+
+    /**
+     * @return 0|1|2|128
+     */
+    private static function subAckReturnCode(ReasonCode $reason): int
+    {
+        return match (true) {
+            $reason === ReasonCode::Success => 0,
+            $reason === ReasonCode::GrantedQos1 => 1,
+            $reason === ReasonCode::GrantedQos2 => 2,
+            $reason->isError() => 0x80,
+            default => throw new ProtocolException("Reason code {$reason->describe()} is not a SUBACK return code."),
+        };
     }
 
     private static function outOfRange(string $what, int $value, int $min, int $max): ProtocolException

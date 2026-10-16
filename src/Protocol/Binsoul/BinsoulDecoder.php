@@ -17,7 +17,7 @@ final class BinsoulDecoder implements Decoder
     {
         $this->parser = new StreamParser;
         $this->parser->onError(static function (Throwable $e): void {
-            throw new ProtocolException($e->getMessage(), 0, $e);
+            throw new ProtocolException($e->getMessage(), previous: $e);
         });
     }
 

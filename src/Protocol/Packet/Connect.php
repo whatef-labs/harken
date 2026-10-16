@@ -6,8 +6,16 @@ namespace Whatef\Harken\Protocol\Packet;
 
 use SensitiveParameter;
 
+/**
+ * Fields after $will are MQTT 5 only; the 3.1.1 codec ignores them. On MQTT 5,
+ * $cleanSession is sent as the Clean Start flag and the session outlives the
+ * connection for $sessionExpiryInterval seconds.
+ */
 final readonly class Connect implements Packet
 {
+    /**
+     * @param  array<string, string|list<string>>  $userProperties
+     */
     public function __construct(
         public string $clientId,
         public int $keepAlive = 60,
@@ -15,6 +23,14 @@ final readonly class Connect implements Packet
         public ?string $username = null,
         #[SensitiveParameter] public ?string $password = null,
         public ?Publish $will = null,
+        public int $sessionExpiryInterval = 0,
+        public ?int $receiveMaximum = null,
+        public ?int $maximumPacketSize = null,
+        public int $topicAliasMaximum = 0,
+        public bool $requestResponseInformation = false,
+        public bool $requestProblemInformation = true,
+        public array $userProperties = [],
+        public int $willDelayInterval = 0,
     ) {}
 
     /**
@@ -22,13 +38,6 @@ final readonly class Connect implements Packet
      */
     public function __debugInfo(): array
     {
-        return [
-            'clientId' => $this->clientId,
-            'keepAlive' => $this->keepAlive,
-            'cleanSession' => $this->cleanSession,
-            'username' => $this->username,
-            'password' => $this->password === null ? null : '********',
-            'will' => $this->will,
-        ];
+        return ['password' => $this->password === null ? null : '********'] + get_object_vars($this);
     }
 }

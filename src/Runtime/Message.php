@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Whatef\Harken\Runtime;
 
+use InvalidArgumentException;
 use UnexpectedValueException;
+use Whatef\Harken\Protocol\Properties;
 
 /**
  * An inbound MQTT message as handed to handlers.
@@ -17,7 +19,7 @@ final readonly class Message
 {
     /**
      * @param  array<string, string>  $params  Values of `{name}` levels in the matched route.
-     * @param  array<string, mixed>  $properties  MQTT 5 properties; always empty on MQTT 3.1.1.
+     * @param  Properties  $properties  MQTT 5 message properties; always empty on MQTT 3.1.1.
      */
     public function __construct(
         public string $topic,
@@ -25,7 +27,7 @@ final readonly class Message
         public int $qos = 0,
         public bool $retain = false,
         public array $params = [],
-        public array $properties = [],
+        public Properties $properties = new Properties,
     ) {}
 
     public function param(string $name, ?string $default = null): ?string
@@ -55,7 +57,7 @@ final readonly class Message
             'qos' => $this->qos,
             'retain' => $this->retain,
             'params' => $this->params,
-            'properties' => $this->properties,
+            'properties' => $this->properties->toArray(),
         ];
     }
 
@@ -72,8 +74,12 @@ final readonly class Message
 
         /** @var array<string, string> $params */
         $params = is_array($data['params'] ?? null) ? $data['params'] : [];
-        /** @var array<string, mixed> $properties */
-        $properties = is_array($data['properties'] ?? null) ? $data['properties'] : [];
+
+        try {
+            $properties = Properties::fromArray(is_array($data['properties'] ?? null) ? $data['properties'] : []);
+        } catch (InvalidArgumentException $e) {
+            throw new UnexpectedValueException('Malformed serialized Harken message.', 0, $e);
+        }
 
         $this->topic = $data['topic'];
         $this->payload = $payload;

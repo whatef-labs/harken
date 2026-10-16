@@ -23,10 +23,10 @@ it('links the client end with a broker end the test can drive', function () {
 
     $client->write($codec->encode(new Connect('c1')));
     $peer = $transport->peer();
-    $peer->write($codec->encode(new ConnAck(0)));
+    $peer->write($codec->encode(new ConnAck));
 
     expect($codec->decoder()->push($peer->drain()))->toEqual([new Connect('c1')])
-        ->and($codec->decoder()->push($received))->toEqual([new ConnAck(0)])
+        ->and($codec->decoder()->push($received))->toEqual([new ConnAck])
         ->and($transport->endpoints()[0]->uri())->toBe('tcp://broker.test:1883');
 });
 
