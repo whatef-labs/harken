@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Cache;
 use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Laravel\HarkenManager;
 use Whatef\Harken\Laravel\HealthStore;
+use Whatef\Harken\Laravel\Pulse\PulseReporter;
 use Whatef\Harken\Laravel\RuntimeBuilder;
 use Whatef\Harken\Observability\HttpEndpoint;
 use Whatef\Harken\Observability\Metrics;
@@ -203,6 +204,7 @@ it('picks the metrics driver from the configuration', function (string $driver, 
     ['null', NullMetrics::class],
     ['prometheus', MetricsRegistry::class],
     ['log', MetricsRegistry::class],
+    ['pulse', MetricsRegistry::class],
 ]);
 
 it('rejects an unknown metrics driver', function () {
@@ -228,6 +230,15 @@ it('serves /metrics and /health with the prometheus driver, and logs metrics wit
     [$runtime] = built_runtime();
 
     expect(array_map(fn ($s) => $s::class, $runtime->sources))->toBe([MetricsLog::class]);
+
+    config()->set('harken.metrics.driver', 'pulse');
+    config()->set('harken.metrics.pulse_interval', 30);
+    app()->forgetInstance(Metrics::class);
+    [$runtime] = built_runtime();
+
+    expect(array_map(fn ($s) => $s::class, $runtime->sources))->toBe([PulseReporter::class])
+        ->and($runtime->sources[0]->intervalSeconds)->toBe(30.0)
+        ->and($runtime->sources[0]->connection)->toBe('default');
 
     config()->set('harken.metrics.driver', 'null');
     config()->set('harken.http.enabled', true);
@@ -264,6 +275,25 @@ it('counts received and published messages for the metrics', function () {
     $runtime->stop('test');
 
     expect(PrometheusFormat::render(app(MetricsRegistry::class)))->toContain('harken_messages_received_total{connection="leader"} 3');
+});
+
+it('brings the received counter up to date before the pulse reporter reads it', function () {
+    config()->set('harken.metrics.driver', 'pulse');
+    app()->forgetInstance(Metrics::class);
+    [$runtime, $broker] = built_runtime();
+    $runtime->start();
+    $broker->use(0)->accept();
+    $broker->grant();
+    $broker->use(1)->accept();
+    $broker->grant();
+    $broker->send(new Publish('sensors/1/temperature', 'x'), new Publish('sensors/2/temperature', 'y'));
+
+    // No heartbeat since the messages arrived: only the reporter's status call counts them.
+    expect(PrometheusFormat::render(app(MetricsRegistry::class)))->toContain('harken_messages_received_total{connection="leader"} 0');
+
+    (fn () => ($this->status)())->call($runtime->sources[0]);
+
+    expect(PrometheusFormat::render(app(MetricsRegistry::class)))->toContain('harken_messages_received_total{connection="leader"} 2');
 });
 
 it('starts every series at zero so Prometheus sees the first event', function () {

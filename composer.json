@@ -23,13 +23,15 @@
     "require-dev": {
         "larastan/larastan": "^3.13",
         "laravel/pint": "^1.32",
+        "laravel/pulse": "^1.4",
         "orchestra/testbench": "^10.12 || ^11.3",
         "pestphp/pest": "^4.7 || ^5.3"
     },
     "suggest": {
         "ext-pcntl": "Graceful shutdown on SIGTERM / SIGINT (Linux, macOS).",
         "ext-pgsql": "PostgreSQL LISTEN/NOTIFY event source driven by the event loop instead of polling.",
-        "ext-uv": "libuv event loop backend, picked up automatically when installed."
+        "ext-uv": "libuv event loop backend, picked up automatically when installed.",
+        "laravel/pulse": "Harken cards on the Pulse dashboard (metrics driver \"pulse\")."
     },
     "autoload": {
         "psr-4": {

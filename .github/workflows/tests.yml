@@ -29,7 +29,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: pcntl, pgsql, sockets
+          extensions: pcntl, pgsql, pdo_sqlite, sockets
           coverage: none
 
       - name: Install dependencies

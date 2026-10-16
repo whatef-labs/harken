@@ -244,6 +244,7 @@ A failed message is still acknowledged, so it is not delivered again. With `HARK
 | `null` (default) | nothing |
 | `prometheus` | every runtime process serves `GET /metrics` in the Prometheus text format on the HTTP endpoint; scrape each replica |
 | `log` | one log line every `harken.metrics.log_interval` seconds (60) with counter increases, histogram counts and averages, and gauges |
+| `pulse` | records to [Laravel Pulse](https://laravel.com/docs/pulse) every `harken.metrics.pulse_interval` seconds (15), for the Harken cards on the Pulse dashboard; needs `laravel/pulse` |
 
 Metrics are kept per process in memory. Work done outside the runtime (queue workers running `->queued()` handlers, web requests queuing publishes) is not counted here.
 
@@ -285,6 +286,30 @@ increase(harken_reconnects_total[10m]) > 5                # the broker connectio
 increase(harken_handlers_failed_total[5m]) > 0            # handlers are failing
 histogram_quantile(0.99, sum by (le) (rate(harken_outbox_latency_seconds_bucket[5m]))) > 0.05
 ```
+
+### Laravel Pulse
+
+With [Laravel Pulse](https://laravel.com/docs/pulse) installed and `HARKEN_METRICS_DRIVER=pulse`, every runtime process records to Pulse every 15 seconds (`HARKEN_METRICS_PULSE_INTERVAL`), so the replicas show up on the application's own `/pulse` dashboard: no Prometheus or Grafana to run. Add the cards to the published dashboard view (`php artisan vendor:publish --tag=pulse-dashboard`, then `resources/views/vendor/pulse/dashboard.blade.php`):
+
+```blade
+<x-pulse>
+    <livewire:harken.replicas cols="full" />
+    <livewire:harken.messages cols="6" />
+    <livewire:harken.handlers cols="6" />
+
+    <livewire:pulse.servers cols="full" />
+    {{-- the other Pulse cards --}}
+</x-pulse>
+```
+
+| Card | Shows |
+|---|---|
+| `harken.replicas` | every `harken:start` process: leader or standby, broker connection state, messages received per second, memory and outbox backlog, as last reported. A replica silent for two intervals shows as gone; one that stopped or went silent more than `ignore-after` ago (10 minutes; `ignore-after="1 hour"`) is left out. |
+| `harken.messages` | messages received and published per broker connection over the period, per second on average and at the busiest point of the graph, with handler failures, outbox drops, reconnects and leader takeovers |
+| `harken.handlers` | per route and NOTIFY channel: messages handled, failed and slow, and the average handler time; sortable |
+
+Each process writes a few aggregated rows per interval, never one per message, so Pulse's storage does not grow with MQTT traffic. The write runs on the event loop: with Pulse's default `storage` ingest it is one database transaction every interval (point `PULSE_INGEST_DRIVER=redis` at Redis to keep it shorter). Pulse drops what it cannot write and hands the error to `Pulse::handleExceptionsUsing()` (silently by default).
+
 ## Planned
 
 - Per-route acknowledgement policy for QoS 1 (`ack after handler`).

@@ -12,12 +12,17 @@ use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Log\LogManager;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
+use Laravel\Pulse\Pulse;
+use Livewire\LivewireManager;
 use Psr\Log\LoggerInterface;
 use React\EventLoop\LoopInterface;
 use Whatef\Harken\Laravel\Console\RestartCommand;
 use Whatef\Harken\Laravel\Console\StartCommand;
 use Whatef\Harken\Laravel\Console\StatusCommand;
 use Whatef\Harken\Laravel\Publishing\StreamsDelegatePublisher;
+use Whatef\Harken\Laravel\Pulse\Livewire\Handlers;
+use Whatef\Harken\Laravel\Pulse\Livewire\Messages;
+use Whatef\Harken\Laravel\Pulse\Livewire\Replicas;
 use Whatef\Harken\Laravel\Queue\FailedMessageStore;
 use Whatef\Harken\Observability\LogContext;
 use Whatef\Harken\Observability\Metrics;
@@ -66,8 +71,11 @@ final class HarkenServiceProvider extends ServiceProvider
 
             return match ($driver) {
                 'prometheus', 'log' => $app->make(MetricsRegistry::class),
+                'pulse' => class_exists(Pulse::class)
+                    ? $app->make(MetricsRegistry::class)
+                    : throw new InvalidArgumentException('The Harken metrics driver [pulse] needs Laravel Pulse: composer require laravel/pulse.'),
                 null, 'null', '' => new NullMetrics,
-                default => throw new InvalidArgumentException('Unknown Harken metrics driver ['.(is_scalar($driver) ? $driver : '?').']; use null, prometheus or log.'),
+                default => throw new InvalidArgumentException('Unknown Harken metrics driver ['.(is_scalar($driver) ? $driver : '?').']; use null, prometheus, log or pulse.'),
             };
         });
         $this->app->bind(HandlerInvoker::class, ContainerHandlerInvoker::class);
@@ -103,6 +111,16 @@ final class HarkenServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->loadViewsFrom(__DIR__.'/../../resources/views', 'harken');
+
+        if (class_exists(Pulse::class) && class_exists(LivewireManager::class)) {
+            $this->callAfterResolving('livewire', static function (LivewireManager $livewire): void {
+                $livewire->component('harken.messages', Messages::class);
+                $livewire->component('harken.replicas', Replicas::class);
+                $livewire->component('harken.handlers', Handlers::class);
+            });
+        }
+
         if (! $this->app->runningInConsole()) {
             return;
         }

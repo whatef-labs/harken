@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /*
- * Traffic for the Grafana dashboard (docker/monitoring):
+ * Traffic for the Grafana dashboard (docker/monitoring) or the Pulse cards:
  *
  *   docker compose -f docker/monitoring/compose.yml up -d
  *   php tests/E2E/demo.php [seconds=180] [rate=500]
@@ -13,6 +13,10 @@ declare(strict_types=1);
  * second and ten outbox commands per second, restarts the leader gracefully
  * (like a deployment) a third of the way in and kills the new leader
  * (like a crash) two thirds of the way in. Needs docker/compose.yml.
+ *
+ * With HARKEN_METRICS_DRIVER=pulse (and DB_* pointing at a database with
+ * the Pulse tables) the replicas record to Pulse instead; serve the
+ * dashboard with `php -S 0.0.0.0:8000 tests/E2E/server.php` and open /pulse.
  */
 
 use Whatef\Harken\Runtime\Outbox\OutboxMessage;
@@ -29,7 +33,8 @@ $prefix = 'demo_';
 
 $env = [
     'HARKEN_HOST' => $host,
-    'HARKEN_METRICS_DRIVER' => 'prometheus',
+    'HARKEN_METRICS_DRIVER' => getenv('HARKEN_METRICS_DRIVER') ?: 'prometheus',
+    'HARKEN_HTTP' => 'true',
     'HARKEN_LEADER_LOCK' => 'redis',
     'HARKEN_LEADER_CLIENT_ID' => 'harken-demo-leader',
     'HARKEN_LOG_CHANNEL' => 'null',
@@ -51,7 +56,10 @@ $start = static function (int $port) use (&$replicas, $env, $dir, $root): void {
 
 $leader = static function () use (&$replicas): ?int {
     foreach (array_keys($replicas) as $port) {
-        if (preg_match('/^harken_leader 1$/m', (string) @file_get_contents("http://127.0.0.1:{$port}/metrics")) === 1) {
+        // The body carries the status even when the replica reports a problem (503).
+        $health = json_decode((string) @file_get_contents("http://127.0.0.1:{$port}/health", context: stream_context_create(['http' => ['ignore_errors' => true]])), true);
+
+        if (($health['leader']['state'] ?? null) === 'leading') {
             return $port;
         }
     }

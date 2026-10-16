@@ -232,8 +232,10 @@ return [
     | log_payloads is enabled.
     |
     | Metrics drivers: "null" (default), "prometheus" (served at /metrics by
-    | each runtime process, see http below) and "log" (a summary line every
-    | log_interval seconds on the logging channel).
+    | each runtime process, see http below), "log" (a summary line every
+    | log_interval seconds on the logging channel) and "pulse" (recorded to
+    | Laravel Pulse every pulse_interval seconds, for the Harken cards on
+    | the Pulse dashboard; needs laravel/pulse).
     |
     */
 
@@ -245,6 +247,7 @@ return [
     'metrics' => [
         'driver' => env('HARKEN_METRICS_DRIVER', 'null'),
         'log_interval' => (int) env('HARKEN_METRICS_LOG_INTERVAL', 60),
+        'pulse_interval' => (int) env('HARKEN_METRICS_PULSE_INTERVAL', 15),
     ],
 
     /*

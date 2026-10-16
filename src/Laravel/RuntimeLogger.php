@@ -167,6 +167,18 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
             $this->metrics->gauge('harken_outbox_waiting', $length, ['stream' => $stream]);
         }
 
+        $this->countMessages($status);
+    }
+
+    /**
+     * Brings the received and published counters up to the connections'
+     * running totals in a status. The heartbeat does it every status
+     * interval; a metrics reporter can do it right before it reads them.
+     *
+     * @param  array<string, mixed>  $status
+     */
+    public function countMessages(array $status): void
+    {
         $mqtt = is_array($status['mqtt'] ?? null) ? $status['mqtt'] : [];
         $this->count('main', (string) json_encode($status['started_at'] ?? null), $mqtt);
         $leader = is_array($status['leader'] ?? null) ? $status['leader'] : [];

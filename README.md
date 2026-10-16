@@ -29,7 +29,7 @@ Harken::urgent()->publish("devices/{$id}/command", json_encode(['open' => true])
 - **Several replicas, each message handled once.** By default one elected leader replica receives the routes (Redis or PostgreSQL lease, fixed client id, persistent session), and a standby takes over in about a second after a deployment or within the lease after a crash. Routes can opt into MQTT shared subscriptions or into every replica.
 - **PostgreSQL `LISTEN/NOTIFY` and timers** on the same loop, on the leader by default.
 - **MQTT 5 and 3.1.1**, TLS, reconnect with backoff, keepalive, broker limits and reason codes.
-- **Operations built in.** Graceful shutdown on SIGTERM, `harken:restart` for deployments, memory and time limits, `harken:status` for health checks, an HTTP `/health` endpoint, Laravel events, Prometheus metrics and a Grafana dashboard.
+- **Operations built in.** Graceful shutdown on SIGTERM, `harken:restart` for deployments, memory and time limits, `harken:status` for health checks, an HTTP `/health` endpoint, Laravel events, Laravel Pulse cards, Prometheus metrics and a Grafana dashboard.
 - **Testable.** `Harken::fake()` records publishes and simulates incoming messages; handlers are plain classes.
 
 ## Requirements
@@ -151,7 +151,17 @@ These numbers are a floor rather than a ceiling. At 20,000 messages per second t
 
 ## Monitoring
 
-Set `HARKEN_METRICS_DRIVER=prometheus` and every runtime serves `/metrics` and `/health` on port 9180. [docker/monitoring](docker/monitoring) holds a Prometheus and Grafana stack with the Harken dashboard: leader and replicas, traffic, handlers, the outbox, takeovers and broker drops.
+**Laravel Pulse.** With [Pulse](https://laravel.com/docs/pulse) in your application, set `HARKEN_METRICS_DRIVER=pulse` and add the Harken cards to its dashboard, like Reverb's: replicas and the leader, messages received and published, and every route's handler.
+
+```blade
+<livewire:harken.replicas cols="full" />
+<livewire:harken.messages cols="6" />
+<livewire:harken.handlers cols="6" />
+```
+
+![Harken cards on the Pulse dashboard](docs/images/pulse.jpg)
+
+**Prometheus and Grafana.** Set `HARKEN_METRICS_DRIVER=prometheus` and every runtime serves `/metrics` and `/health` on port 9180. [docker/monitoring](docker/monitoring) holds a Prometheus and Grafana stack with the Harken dashboard: leader and replicas, traffic, handlers, the outbox, takeovers and broker drops.
 
 ![Harken dashboard in Grafana](docs/images/dashboard.jpg)
 

@@ -10,9 +10,11 @@ use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher as Events;
 use Illuminate\Log\LogManager;
+use Laravel\Pulse\Pulse;
 use Psr\Log\LoggerInterface;
 use React\EventLoop\LoopInterface;
 use Whatef\Harken\Laravel\Publishing\ReportingPublisher;
+use Whatef\Harken\Laravel\Pulse\PulseReporter;
 use Whatef\Harken\Observability\HttpEndpoint;
 use Whatef\Harken\Observability\Metrics;
 use Whatef\Harken\Observability\MetricsLog;
@@ -122,7 +124,7 @@ final class RuntimeBuilder
         $broadcast = $notifications->only(Distribution::Broadcast);
         $sources = $broadcast->routes() === [] ? [] : [$this->source($broadcast, $loop, $logger, $invoker, $observer, $threshold)];
         $runtime = null;
-        array_push($sources, ...$this->observability($logger, static function () use (&$runtime): ?Runtime {
+        array_push($sources, ...$this->observability($name, $logger, static function () use (&$runtime): ?Runtime {
             return $runtime;
         }));
 
@@ -315,13 +317,13 @@ final class RuntimeBuilder
     }
 
     /**
-     * The HTTP endpoint (/health, and /metrics for the prometheus driver)
-     * and the metrics log line, as configured.
+     * The HTTP endpoint (/health, and /metrics for the prometheus driver),
+     * the metrics log line and the Pulse reporter, as configured.
      *
      * @param  Closure(): ?Runtime  $runtime
      * @return list<Source>
      */
-    private function observability(RuntimeLogger $logger, Closure $runtime): array
+    private function observability(string $connection, RuntimeLogger $logger, Closure $runtime): array
     {
         $driver = $this->config->get('harken.metrics.driver', 'null');
         $metrics = $this->app->make(Metrics::class);
@@ -330,6 +332,26 @@ final class RuntimeBuilder
 
         if ($driver === 'log' && $registry !== null) {
             $sources[] = new MetricsLog($registry, $this->logChannel(), max(1.0, $this->float('harken.metrics.log_interval', 60.0)));
+        }
+
+        if ($driver === 'pulse' && $registry !== null) {
+            $sources[] = new PulseReporter(
+                $this->app->make(Pulse::class),
+                $registry,
+                static function () use ($runtime, $logger): ?array {
+                    $status = $runtime()?->status();
+
+                    if ($status !== null) {
+                        // Received counts otherwise lag by up to a status interval behind handled ones.
+                        $logger->countMessages($status);
+                    }
+
+                    return $status;
+                },
+                $connection,
+                max(1.0, $this->float('harken.metrics.pulse_interval', 15.0)),
+                $logger->error(...),
+            );
         }
 
         if ($driver === 'prometheus' || $this->config->get('harken.http.enabled', false)) {

@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Whatef\Harken\Tests\E2E;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Pulse\PulseServiceProvider;
+use Livewire\LivewireServiceProvider;
 use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Runtime\Message;
 use Whatef\Harken\Tests\E2E\Load\DeviceReport;
@@ -20,11 +23,25 @@ use Whatef\Harken\Tests\E2E\Load\SlowReport;
  *
  * `e2e:publish {topic} {payload} {--urgent}` publishes through the facade,
  * which outside the runtime means the outbox.
+ *
+ * With HARKEN_METRICS_DRIVER=pulse the application also runs Livewire and
+ * Laravel Pulse, whose dashboard (/pulse) shows the Harken cards; see
+ * demo.php. Other runs leave Pulse out, so it cannot weigh on measurements.
  */
 final class E2EServiceProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        if (getenv('HARKEN_METRICS_DRIVER') === 'pulse') {
+            $this->app->register(LivewireServiceProvider::class);
+            $this->app->register(PulseServiceProvider::class);
+        }
+    }
+
     public function boot(): void
     {
+        View::prependNamespace('pulse', __DIR__.'/pulse');
+
         if (getenv('E2E_MODE') === 'load') {
             // load.php: light reports inline; slow reports inline or queued (E2E_SLOW).
             Harken::topic('load/{id}/up', DeviceReport::class)->qos(1);
