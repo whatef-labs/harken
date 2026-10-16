@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Pulse\PulseServiceProvider;
 use Livewire\LivewireServiceProvider;
+use RuntimeException;
 use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Runtime\Message;
 use Whatef\Harken\Tests\E2E\Load\DeviceReport;
@@ -49,6 +50,13 @@ final class E2EServiceProvider extends ServiceProvider
 
             if (getenv('E2E_SLOW') === 'queued') {
                 $slow->queued();
+            }
+
+            if (getenv('E2E_SOAK')) {
+                // soak.php: the other paths a long run has to go through.
+                Harken::topic('load/{id}/bad', static fn () => throw new RuntimeException('soak: a failing handler'))->qos(1);
+                Harken::listen('harken_soak', static function (): void {});
+                Harken::every(1, static function (): void {});
             }
 
             return;
