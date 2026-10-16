@@ -33,6 +33,9 @@ use function React\Promise\resolve;
  *
  * A graceful stop disconnects the leader connection and releases the lock
  * at once, so a standby replica takes over within one retry interval.
+ *
+ * Without a connection factory the election runs for other leader-only work
+ * (term listeners), such as PostgreSQL notification sources.
  */
 final class Leadership
 {
@@ -54,20 +57,26 @@ final class Leadership
 
     private ?TimerInterface $expiryTimer = null;
 
-    /** @var Closure(): Connection */
-    private readonly Closure $connect;
+    /** @var (Closure(): Connection)|null */
+    private readonly ?Closure $connect;
+
+    /** @var list<Closure(int): void> */
+    private array $termStarted = [];
+
+    /** @var list<Closure(int): void> */
+    private array $termEnded = [];
 
     /** @var Closure(): float */
     private readonly Closure $clock;
 
     /**
-     * @param  callable(): Connection  $connect  Creates the leader connection (not yet connected).
+     * @param  (callable(): Connection)|null  $connect  Creates the leader connection (not yet connected).
      * @param  (callable(): float)|null  $clock  Monotonic seconds; injected for tests.
      */
     public function __construct(
         private readonly LoopInterface $loop,
         public readonly LeaderLock $lock,
-        callable $connect,
+        ?callable $connect,
         private readonly LeadershipObserver $observer,
         public readonly float $leaseSeconds = 5.0,
         public readonly float $retryInterval = 0.25,
@@ -77,7 +86,7 @@ final class Leadership
             throw new InvalidArgumentException('The lease and the retry interval must be greater than zero.');
         }
 
-        $this->connect = $connect(...);
+        $this->connect = $connect === null ? null : $connect(...);
         $this->clock = $clock === null ? static fn (): float => hrtime(true) / 1e9 : $clock(...);
         $this->owner = self::token();
     }
@@ -103,6 +112,28 @@ final class Leadership
     public function connection(): ?Connection
     {
         return $this->connection;
+    }
+
+    /**
+     * True while this replica leads and its own count of the lease has not
+     * run out. Leader-only work checks it before acting.
+     */
+    public function holdsLease(): bool
+    {
+        return $this->state === LeadershipState::Leading && $this->now() < $this->validUntil;
+    }
+
+    /**
+     * Called when this replica starts leading (after the lock is taken) and
+     * when it stops leading, with the term number.
+     *
+     * @param  callable(int $term): void  $started
+     * @param  callable(int $term): void  $ended
+     */
+    public function onTerm(callable $started, callable $ended): void
+    {
+        $this->termStarted[] = $started(...);
+        $this->termEnded[] = $ended(...);
     }
 
     public function start(): void
@@ -132,6 +163,10 @@ final class Leadership
         $wasLeading = $this->state === LeadershipState::Leading;
         $this->state = LeadershipState::Stopped;
         $this->cancelTimers();
+
+        if ($wasLeading) {
+            $this->endTerm();
+        }
 
         $connection = $this->connection;
         $this->connection = null;
@@ -191,13 +226,23 @@ final class Leadership
         $this->renewTimer = $this->loop->addPeriodicTimer($this->leaseSeconds / 3, $this->renew(...));
         $this->observer->acquired($term, $grant->vacantSeconds);
 
+        foreach ($this->termStarted as $listener) {
+            $listener($term);
+        }
+
         if ($this->state !== LeadershipState::Leading || $term !== $this->term) {
+            return;
+        }
+
+        if ($this->connect === null) {
+            $this->observer->subscribed($term, 0.0, $grant->vacantSeconds);
+
             return;
         }
 
         $connection = ($this->connect)();
         $this->connection = $connection;
-        $connection->guard(fn (): bool => $this->state === LeadershipState::Leading && $this->term === $term && $this->now() < $this->validUntil);
+        $connection->guard(fn (): bool => $this->term === $term && $this->holdsLease());
         $connection->onClose(function (?Throwable $reason) use ($connection): void {
             $this->connectionClosed($connection, $reason);
         });
@@ -302,6 +347,7 @@ final class Leadership
 
         $this->state = LeadershipState::Standby;
         $this->cancelTimers();
+        $this->endTerm();
 
         $connection = $this->connection;
         $this->connection = null;
@@ -318,6 +364,13 @@ final class Leadership
 
         if ($this->state === LeadershipState::Standby) {
             $this->retryLater();
+        }
+    }
+
+    private function endTerm(): void
+    {
+        foreach ($this->termEnded as $listener) {
+            $listener($this->term);
         }
     }
 

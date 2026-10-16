@@ -310,3 +310,28 @@ it('stops a standby replica without touching the lock', function () {
         ->and($store->holder)->toBe('leader')
         ->and($replica->leadership->state())->toBe(LeadershipState::Stopped);
 });
+
+it('runs leader-only work without a leader connection, and tells when terms start and end', function () {
+    $loop = new FakeLoop;
+    $store = FakeLeaderLock::store();
+    $observer = new RecordingLeadershipObserver;
+    $leadership = new Leadership($loop, new FakeLeaderLock($loop, $store), null, $observer, 5.0, 0.25, $loop->now(...));
+    $terms = [];
+    $leadership->onTerm(function (int $term) use (&$terms, $leadership) {
+        $terms[] = "start {$term} ".($leadership->holdsLease() ? 'held' : 'not held');
+    }, function (int $term) use (&$terms) {
+        $terms[] = "end {$term}";
+    });
+
+    $leadership->start();
+    $store->holder = 'someone-else';
+    $loop->advance(1.7);
+    $store->holder = null;
+    $loop->advance(0.25);
+    $leadership->stop();
+
+    expect($terms)->toBe(['start 1 held', 'end 1', 'start 2 held', 'end 2'])
+        ->and($leadership->connection())->toBeNull()
+        ->and($leadership->holdsLease())->toBeFalse()
+        ->and($observer->events[1])->toBe('subscribed 1 gap=null');
+});

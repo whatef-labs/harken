@@ -167,7 +167,8 @@ return [
     | sockets and timers and wakes as soon as one of them is ready, so a
     | broker message, an outbox entry or a notification is handled at once.
     |
-    | PostgreSQL LISTEN/NOTIFY is watched the same way when ext-pgsql is
+    | PostgreSQL LISTEN/NOTIFY (Harken::listen()) uses its own session on
+    | the given database connection, watched the same way when ext-pgsql is
     | loaded. Without it, the source polls through PDO every
     | poll_interval_ms milliseconds.
     |
@@ -175,6 +176,7 @@ return [
 
     'sources' => [
         'pgsql' => [
+            'connection' => env('HARKEN_PGSQL_CONNECTION', 'pgsql'),
             'poll_interval_ms' => (int) env('HARKEN_PGSQL_POLL_MS', 10),
         ],
     ],

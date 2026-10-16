@@ -26,7 +26,7 @@ class HarkenFake extends HarkenManager
 
     public function __construct(HarkenManager $manager, private readonly HandlerInvoker $invoker)
     {
-        parent::__construct($manager->router, $manager->scheduler, $manager->publisher, $manager->routesPath);
+        parent::__construct($manager->router, $manager->scheduler, $manager->publisher, $manager->routesPath, $manager->notifications);
 
         $this->routesLoaded = $manager->routesLoaded;
     }

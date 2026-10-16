@@ -21,6 +21,8 @@ use Whatef\Harken\Observability\NullMetrics;
 use Whatef\Harken\Runtime\Routing\DispatchObserver;
 use Whatef\Harken\Runtime\Routing\HandlerInvoker;
 use Whatef\Harken\Runtime\Routing\Router;
+use Whatef\Harken\Runtime\Sources\NotificationInvoker;
+use Whatef\Harken\Runtime\Sources\NotificationObserver;
 use Whatef\Harken\Runtime\Timers\Scheduler;
 
 final class HarkenServiceProvider extends ServiceProvider
@@ -50,6 +52,8 @@ final class HarkenServiceProvider extends ServiceProvider
 
         $this->app->singleton(Metrics::class, NullMetrics::class);
         $this->app->bind(HandlerInvoker::class, ContainerHandlerInvoker::class);
+        $this->app->bind(NotificationInvoker::class, ContainerHandlerInvoker::class);
+        $this->app->bind(NotificationObserver::class, DispatchObserver::class);
 
         $this->app->bind(DispatchObserver::class, static function (Container $app): DispatchObserver {
             $config = $app->make(Config::class);

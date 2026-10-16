@@ -9,6 +9,8 @@ use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Publisher;
 use Whatef\Harken\Runtime\Routing\Route;
 use Whatef\Harken\Runtime\Routing\Router;
+use Whatef\Harken\Runtime\Sources\NotificationRoute;
+use Whatef\Harken\Runtime\Sources\NotificationRouter;
 use Whatef\Harken\Runtime\Timers\Scheduler;
 use Whatef\Harken\Runtime\Topic;
 
@@ -28,6 +30,7 @@ class HarkenManager
         protected Scheduler $scheduler,
         protected Publisher $publisher,
         protected ?string $routesPath = null,
+        protected NotificationRouter $notifications = new NotificationRouter,
     ) {}
 
     /**
@@ -60,6 +63,17 @@ class HarkenManager
     }
 
     /**
+     * Handles PostgreSQL NOTIFY on a channel. Only the leader replica
+     * listens unless the route calls ->broadcast().
+     *
+     * @param  class-string|callable  $handler
+     */
+    public function listen(string $channel, string|callable $handler): NotificationRoute
+    {
+        return $this->notifications->add(new NotificationRoute($channel, $handler));
+    }
+
+    /**
      * @param  callable(): mixed  $callback
      */
     public function every(int|float $seconds, callable $callback): void
@@ -79,6 +93,13 @@ class HarkenManager
         $this->loadRoutes();
 
         return $this->scheduler;
+    }
+
+    public function notifications(): NotificationRouter
+    {
+        $this->loadRoutes();
+
+        return $this->notifications;
     }
 
     /**

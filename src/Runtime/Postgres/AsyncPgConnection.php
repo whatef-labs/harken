@@ -30,6 +30,10 @@ use function React\Promise\resolve;
  *
  * A failing socket is removed from the loop inside the callback that
  * noticed it; a dead stream left in StreamSelectLoop stops the whole loop.
+ * libpq closes the socket as soon as it reads the end of the connection,
+ * possibly while parsing messages (for example the FATAL message of an
+ * idle-session timeout), so the connection status is checked after every
+ * call into libpq, not only when a read fails.
  */
 final class AsyncPgConnection
 {
@@ -216,7 +220,7 @@ final class AsyncPgConnection
         [$sql, $deferred] = $this->queue->dequeue();
         $this->current = $deferred;
 
-        if (@pg_send_query($pg, $sql) !== true) {
+        if (@pg_send_query($pg, $sql) !== true || ! self::alive($pg)) {
             $this->fail(new RuntimeException('Cannot send a query to PostgreSQL: '.trim(pg_last_error($pg))));
 
             return;
@@ -236,9 +240,22 @@ final class AsyncPgConnection
             return;
         }
 
-        if (! @pg_consume_input($pg) || pg_connection_status($pg) !== PGSQL_CONNECTION_OK) {
+        $this->drain($pg);
+
+        if ($this->pg === $pg && ! self::alive($pg)) {
+            $this->fail(new RuntimeException('The PostgreSQL connection was lost.'));
+        }
+    }
+
+    private function drain(PgSqlConnection $pg): void
+    {
+        if (! @pg_consume_input($pg)) {
             $this->fail(new RuntimeException('The PostgreSQL connection was lost.'));
 
+            return;
+        }
+
+        if (! self::alive($pg)) {
             return;
         }
 
@@ -254,7 +271,7 @@ final class AsyncPgConnection
 
         $deferred = $this->current;
 
-        if ($deferred === null || pg_connection_busy($pg)) {
+        if ($deferred === null || pg_connection_busy($pg) || ! self::alive($pg)) {
             return;
         }
 
@@ -280,6 +297,11 @@ final class AsyncPgConnection
             : $deferred->reject(new RuntimeException("PostgreSQL query failed: {$error}"));
 
         $this->next();
+    }
+
+    private static function alive(PgSqlConnection $pg): bool
+    {
+        return pg_connection_status($pg) === PGSQL_CONNECTION_OK;
     }
 
     private function fail(Throwable $reason): void

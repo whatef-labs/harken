@@ -33,6 +33,7 @@ Harken::every(5, fn () => /* sweep pending work */ null);
 | `Route::shared` | `shared(string $group): static` — MQTT shared subscription group | stable |
 | `Route::broadcast` | `broadcast(): static` — every replica subscribes | stable |
 | `Harken::every` | `every(int\|float $seconds, callable $callback): void` | stable |
+| `Harken::listen` | `listen(string $channel, string\|callable $handler): NotificationRoute` — PostgreSQL NOTIFY; `->leader()` (default), `->broadcast()`, `->queued()` | stable |
 
 ### Topic patterns
 
@@ -134,6 +135,30 @@ Harken::publish('cmd/door/1', '{"open":true}', qos: 1, properties: new Propertie
 ```
 
 User properties keep every value of a repeated name, in order. The relative order of different names is not kept.
+## PostgreSQL notifications
+
+```php
+use Whatef\Harken\Runtime\Sources\Notification;
+
+Harken::listen('outbox_ready', SweepPending::class);               // the leader replica only
+Harken::listen('config_changed', RefreshCache::class)->broadcast(); // every replica
+
+final class SweepPending
+{
+    public function __invoke(Notification $notification): void
+    {
+        // $notification->channel, $notification->payload
+        // $notification->resync: listening (re)started; look for work you may have missed
+    }
+}
+```
+
+- The runtime listens on its own session of the database connection `harken.sources.pgsql.connection` (default `pgsql`). With ext-pgsql the session's socket is watched by the event loop; without it, `Pdo\Pgsql::getNotify()` is polled every `harken.sources.pgsql.poll_interval_ms` (10 ms).
+- PostgreSQL sends a NOTIFY to every listening session, so by default only the elected leader listens, and a notification is handled by one process. `->broadcast()` makes every replica listen.
+- NOTIFY is a hint, not a queue: notifications sent while nobody listens are lost, and identical ones in one transaction are folded into one. Each time listening starts (process start, reconnect, a new leader), every handler of the channel is called once with `resync` set and an empty payload. A periodic `Harken::every()` sweep covers the same gap.
+- Channel names are used as given (`LISTEN "name"`), so they are case-sensitive. Send with `pg_notify('name', payload)` or `NOTIFY "name"`; an unquoted `NOTIFY Name` is folded to lower case.
+- `Whatef\Harken\Runtime\Sources\Notification` is a readonly value object: `channel`, `payload`, `resync`.
+
 ## Publishing
 
 | Method | Signature | Status |
@@ -177,6 +202,5 @@ Each connection in `config/harken.php` sets `protocol` (`HARKEN_PROTOCOL`): `5.0
 
 ## Planned
 
-- External event sources (PostgreSQL `LISTEN/NOTIFY`): registration API after spike 04.
 - Per-route acknowledgement policy for QoS 1 (`ack after handler`).
 - Payload decoders (opt-in; raw bytes stay the default).
