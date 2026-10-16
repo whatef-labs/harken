@@ -20,7 +20,7 @@ interface Outbox
      * Stops taking new entries and resolves once in-flight entries are
      * acknowledged or the grace period ends.
      *
-     * @return PromiseInterface<void>
+     * @return PromiseInterface<null>
      */
     public function stop(float $graceSeconds): PromiseInterface;
 }

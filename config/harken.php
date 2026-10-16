@@ -138,6 +138,11 @@ return [
     | confirmed it, so delivery is at least once. The urgent stream is always
     | drained before the normal one.
     |
+    | batch is also the most entries one replica publishes at once; max_rate
+    | (messages per second, empty for no limit) paces a large backlog so it
+    | does not overflow subscribers' session queues on the broker. Entries
+    | left pending by a replica that died are taken over after claim_idle_ms.
+    |
     */
 
     'outbox' => [
@@ -150,6 +155,7 @@ return [
         'block_ms' => 1000,
         'batch' => 100,
         'claim_idle_ms' => 30000,
+        'max_rate' => env('HARKEN_OUTBOX_MAX_RATE'),
     ],
 
     /*

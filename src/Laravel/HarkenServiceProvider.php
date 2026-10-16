@@ -7,6 +7,7 @@ namespace Whatef\Harken\Laravel;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Log\LogManager;
 use Illuminate\Support\ServiceProvider;
 use Psr\Log\LoggerInterface;
@@ -37,7 +38,12 @@ final class HarkenServiceProvider extends ServiceProvider
             return new HarkenManager(
                 new Router,
                 new Scheduler,
-                new StreamsDelegatePublisher(is_string($redis) ? $redis : 'default', is_string($stream) ? $stream : 'harken:outbox:normal'),
+                new StreamsDelegatePublisher(
+                    $app->make(RedisFactory::class),
+                    new StoreConfig($config),
+                    is_string($redis) ? $redis : 'default',
+                    is_string($stream) ? $stream : 'harken:outbox:normal',
+                ),
                 is_string($routes) ? $routes : null,
             );
         });

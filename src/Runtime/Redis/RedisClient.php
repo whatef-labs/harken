@@ -67,6 +67,17 @@ final class RedisClient
     }
 
     /**
+     * Closes once the replies to the commands already sent have arrived.
+     */
+    public function end(): void
+    {
+        $this->closed = true;
+        $client = $this->client;
+        $this->client = null;
+        $client?->end();
+    }
+
+    /**
      * @return PromiseInterface<Client>
      */
     private function connection(): PromiseInterface
