@@ -21,7 +21,7 @@ use function React\Promise\resolve;
  */
 class HarkenFake extends HarkenManager
 {
-    /** @var list<array{topic: string, payload: string, qos: int, retain: bool, properties: Properties}> */
+    /** @var list<array{topic: string, payload: string, qos: int, retain: bool, properties: Properties, urgent: bool}> */
     private array $published = [];
 
     public function __construct(HarkenManager $manager, private readonly HandlerInvoker $invoker)
@@ -31,11 +31,11 @@ class HarkenFake extends HarkenManager
         $this->routesLoaded = $manager->routesLoaded;
     }
 
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
+    public function send(string $topic, string $payload, int $qos, bool $retain, ?Properties $properties, bool $urgent): PromiseInterface
     {
         Topic::assertPublishable($topic, $qos);
 
-        $this->published[] = ['topic' => $topic, 'payload' => $payload, 'qos' => $qos, 'retain' => $retain, 'properties' => $properties ?? new Properties];
+        $this->published[] = ['topic' => $topic, 'payload' => $payload, 'qos' => $qos, 'retain' => $retain, 'properties' => $properties ?? new Properties, 'urgent' => $urgent];
 
         return resolve(null);
     }
@@ -62,7 +62,7 @@ class HarkenFake extends HarkenManager
     }
 
     /**
-     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties): bool)|null  $callback
+     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties, bool $urgent): bool)|null  $callback
      */
     public function assertPublished(string $topic, ?callable $callback = null): void
     {
@@ -73,7 +73,7 @@ class HarkenFake extends HarkenManager
     }
 
     /**
-     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties): bool)|null  $callback
+     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties, bool $urgent): bool)|null  $callback
      */
     public function assertNotPublished(string $topic, ?callable $callback = null): void
     {
@@ -91,15 +91,15 @@ class HarkenFake extends HarkenManager
     }
 
     /**
-     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties): bool)|null  $callback
-     * @return list<array{topic: string, payload: string, qos: int, retain: bool, properties: Properties}>
+     * @param  (callable(string $payload, int $qos, bool $retain, Properties $properties, bool $urgent): bool)|null  $callback
+     * @return list<array{topic: string, payload: string, qos: int, retain: bool, properties: Properties, urgent: bool}>
      */
     public function published(string $topic, ?callable $callback = null): array
     {
         return array_values(array_filter(
             $this->published,
             static fn (array $message): bool => $message['topic'] === $topic
-                && ($callback === null || $callback($message['payload'], $message['qos'], $message['retain'], $message['properties'])),
+                && ($callback === null || $callback($message['payload'], $message['qos'], $message['retain'], $message['properties'], $message['urgent'])),
         ));
     }
 }

@@ -47,9 +47,29 @@ class HarkenManager
      */
     public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
     {
+        return $this->send($topic, $payload, $qos, $retain, $properties, false);
+    }
+
+    /**
+     * Publishing that goes ahead of messages that are not urgent and still
+     * waiting: the urgent outbox stream outside the runtime, the front of the
+     * connection's queue inside it.
+     */
+    public function urgent(): UrgentPublisher
+    {
+        return new UrgentPublisher($this);
+    }
+
+    /**
+     * @internal Used by publish() and UrgentPublisher.
+     *
+     * @return PromiseInterface<mixed>
+     */
+    public function send(string $topic, string $payload, int $qos, bool $retain, ?Properties $properties, bool $urgent): PromiseInterface
+    {
         Topic::assertPublishable($topic, $qos);
 
-        return $this->publisher->publish($topic, $payload, $qos, $retain, $properties);
+        return $this->publisher->publish($topic, $payload, $qos, $retain, $properties, $urgent);
     }
 
     /**

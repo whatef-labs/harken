@@ -624,3 +624,21 @@ it('refuses a codec that speaks another version', function () {
         $loop,
     );
 })->throws(InvalidArgumentException::class, 'The codec speaks MQTT 3.1.1 but the connection is configured for MQTT 5.0.');
+
+it('sends urgent publishes ahead of others waiting for the Receive Maximum', function () {
+    [$connection, $broker] = connection();
+    $connection->connect();
+    $broker->accept(new ConnAck(receiveMaximum: 1));
+
+    $connection->publish('bulk/1', 'x', 1);
+    $connection->publish('bulk/2', 'x', 1);
+    $connection->publish('bulk/3', 'x', 1);
+    $connection->publish('door/open', 'x', 1, urgent: true);
+    [$first] = $broker->received();
+    $broker->send(new PubAck($first->packetId));
+    [$second] = $broker->received();
+
+    expect($first->topic)->toBe('bulk/1')
+        ->and($second->topic)->toBe('door/open')
+        ->and($connection->queuedCount())->toBe(2);
+});

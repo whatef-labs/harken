@@ -45,6 +45,18 @@ describe('publishing', function () {
         Harken::assertPublished('cmd/door/2', fn (string $payload, int $qos, bool $retain, Properties $properties) => $properties->isEmpty());
     });
 
+    it('records urgent publishes', function () {
+        Harken::fake();
+
+        Harken::urgent()->publish('cmd/door/1', 'open', 1);
+        Harken::urgent()->clearRetained('state/door/1');
+        Harken::publish('cmd/door/2', 'open', 1);
+
+        Harken::assertPublished('cmd/door/1', fn (string $payload, int $qos, bool $retain, Properties $properties, bool $urgent) => $urgent);
+        Harken::assertPublished('state/door/1', fn (string $payload, int $qos, bool $retain, Properties $properties, bool $urgent) => $urgent && $retain && $payload === '');
+        Harken::assertNotPublished('cmd/door/2', fn (string $payload, int $qos, bool $retain, Properties $properties, bool $urgent) => $urgent);
+    });
+
     it('fails assertions with a clear message', function () {
         Harken::fake();
 

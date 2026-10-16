@@ -165,20 +165,21 @@ final class SweepPending
 |---|---|---|
 | `Harken::publish` | `publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface` | stable |
 | `Harken::clearRetained` | `clearRetained(string $topic): PromiseInterface` — empty payload, retain, QoS 1 | stable |
+| `Harken::urgent` | `urgent(): UrgentPublisher` — `->publish(...)` and `->clearRetained(...)` with the same arguments, sent ahead of messages that are not urgent | stable |
 
 `PromiseInterface` is `React\Promise\PromiseInterface`.
 
 - **Inside the runtime** (handlers, timers, sources): the message goes out on the runtime's own connection. For QoS 1 the promise resolves only after the PUBACK. On MQTT 5 it rejects when the PUBACK carries an error reason code (for example 0x87 not authorized).
 - **Outside the runtime** (HTTP requests, queued jobs, `->queued()` handlers): the message is appended to a Redis stream (`harken.outbox.redis`, with the connection's key prefix) and a running runtime publishes it. The call is synchronous: it returns an already resolved promise holding the stream entry id once `XADD` succeeded, and throws `Whatef\Harken\Laravel\Publishing\OutboxUnavailable` when Redis could not store it, so a failure cannot go unnoticed in code that ignores the promise. It does not wait for the broker.
 - Every runtime replica consumes the outbox as one consumer group, so each message is published by one replica. An entry is removed only after the broker acknowledged it (PUBACK for QoS 1), so delivery is at least once; entries a crashed replica left pending are taken over after `claim_idle_ms`. A message the broker refuses for good (MQTT 5 reason code such as 0x87 not authorized) is dropped and reported rather than retried forever. `harken.outbox.max_rate` paces a large backlog.
-- Publish priority (urgent / normal streams) is **planned**.
+- **Urgent messages.** `Harken::urgent()->publish('cmd/door/1', $payload, qos: 1)` goes to the urgent outbox stream, which every runtime drains before the normal one, so a command is not stuck behind a bulk backlog. Inside the runtime it goes to the front of the connection's queue of messages waiting for the broker's Receive Maximum.
 
 ## Testing
 
 | Method | Signature | Status |
 |---|---|---|
 | `Harken::fake` | `fake(): HarkenFake` | stable |
-| `Harken::assertPublished` | `assertPublished(string $topic, ?callable $callback = null): void` — callback receives `(string $payload, int $qos, bool $retain, Properties $properties)` and returns bool | stable |
+| `Harken::assertPublished` | `assertPublished(string $topic, ?callable $callback = null): void` — callback receives `(string $payload, int $qos, bool $retain, Properties $properties, bool $urgent)` and returns bool | stable |
 | `Harken::assertNotPublished` | `assertNotPublished(string $topic, ?callable $callback = null): void` | stable |
 | `Harken::assertNothingPublished` | `assertNothingPublished(): void` | stable |
 | `Harken::simulate` | `simulate(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): void` | stable |

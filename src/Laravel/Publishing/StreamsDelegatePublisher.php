@@ -31,25 +31,28 @@ final readonly class StreamsDelegatePublisher implements Publisher
 {
     /**
      * @param  string  $stream  Stream key without the Redis key prefix.
+     * @param  string  $urgentStream  Stream for urgent messages, served first by the runtime.
      */
     public function __construct(
         private RedisFactory $redis,
         private StoreConfig $stores,
         public string $redisConnection,
         public string $stream,
+        public string $urgentStream,
     ) {}
 
     /**
      * @return PromiseInterface<string>
      */
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null, bool $urgent = false): PromiseInterface
     {
         $message = new OutboxMessage($topic, $payload, $qos, $retain, null, $properties ?? new Properties);
 
         try {
             // Raw commands skip the client's own key prefix; add the same
             // prefix the runtime reads with.
-            $command = ['XADD', $this->stores->redis($this->redisConnection)->prefix.$this->stream, '*'];
+            $stream = $urgent ? $this->urgentStream : $this->stream;
+            $command = ['XADD', $this->stores->redis($this->redisConnection)->prefix.$stream, '*'];
 
             foreach ($message->toFields() as $field => $value) {
                 $command[] = $field;

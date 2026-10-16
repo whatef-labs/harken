@@ -52,6 +52,7 @@ use function React\Promise\resolve;
  * - QoS 1 publishes resolve on PUBACK. Publishes made while reconnecting wait
  *   in a bounded queue; unacknowledged ones are sent again (DUP) after a
  *   reconnect. At most the broker's Receive Maximum are in flight at once.
+ *   Urgent publishes wait in a queue of their own that is served first.
  * - Transient failures reconnect with backoff. A permanent refusal, a refused
  *   subscription, an MQTT 5 "session taken over" or disconnect() end the
  *   connection for good and notify the close listeners.
@@ -99,6 +100,9 @@ final class Connection implements Publisher
     /** @var SplQueue<OutboundPublish> */
     private SplQueue $queue;
 
+    /** @var SplQueue<OutboundPublish> */
+    private SplQueue $urgentQueue;
+
     /** @var array<int, Deferred<SubAck>> */
     private array $subAcks = [];
 
@@ -145,6 +149,7 @@ final class Connection implements Publisher
         $this->ids = new PacketIdPool;
         $this->limits = new BrokerLimits;
         $this->queue = new SplQueue;
+        $this->urgentQueue = new SplQueue;
     }
 
     public function state(): ConnectionState
@@ -264,7 +269,7 @@ final class Connection implements Publisher
      *
      * @return PromiseInterface<null>
      */
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null, bool $urgent = false): PromiseInterface
     {
         try {
             Topic::assertPublishable($topic, $qos);
@@ -276,12 +281,12 @@ final class Connection implements Publisher
             return reject(ConnectionClosed::notConnected());
         }
 
-        if ($this->queue->count() >= $this->options->maxQueued) {
+        if ($this->queuedCount() >= $this->options->maxQueued) {
             return reject(PublishRejected::queueFull($topic, $this->options->maxQueued));
         }
 
         $outbound = new OutboundPublish(new Publish($topic, $payload, $qos, $retain, properties: $properties ?? new Properties));
-        $this->queue->enqueue($outbound);
+        ($urgent ? $this->urgentQueue : $this->queue)->enqueue($outbound);
         $this->flush();
 
         return $outbound->deferred->promise();
@@ -295,7 +300,7 @@ final class Connection implements Publisher
      */
     public function whenIdle(): PromiseInterface
     {
-        if ($this->inFlight === [] && $this->queue->isEmpty()) {
+        if ($this->inFlight === [] && $this->queuedCount() === 0) {
             return resolve(null);
         }
 
@@ -383,7 +388,7 @@ final class Connection implements Publisher
 
     public function queuedCount(): int
     {
-        return $this->queue->count();
+        return $this->queue->count() + $this->urgentQueue->count();
     }
 
     /**
@@ -693,20 +698,23 @@ final class Connection implements Publisher
     }
 
     /**
-     * Sends waiting publishes while connected, in order, keeping QoS 1 within
-     * the broker's Receive Maximum.
+     * Sends waiting publishes while connected, urgent ones first, each queue
+     * in order, keeping QoS 1 within the broker's Receive Maximum.
      */
     private function flush(): void
     {
-        while ($this->state === ConnectionState::Connected && $this->socket !== null && ! $this->queue->isEmpty()) {
-            $next = $this->queue->bottom();
+        while ($this->state === ConnectionState::Connected && $this->socket !== null) {
+            $queue = $this->urgentQueue->isEmpty() ? $this->queue : $this->urgentQueue;
 
-            if ($next->packet->qos === 1 && count($this->inFlight) >= $this->limits->receiveMaximum) {
+            if ($queue->isEmpty()) {
+                break;
+            }
+
+            if ($queue->bottom()->packet->qos === 1 && count($this->inFlight) >= $this->limits->receiveMaximum) {
                 return;
             }
 
-            $this->queue->dequeue();
-            $this->send($next);
+            $this->send($queue->dequeue());
         }
 
         $this->notifyIdle();
@@ -856,8 +864,10 @@ final class Connection implements Publisher
 
         $this->inFlight = [];
 
-        while (! $this->queue->isEmpty()) {
-            $this->queue->dequeue()->deferred->reject($closed);
+        foreach ([$this->urgentQueue, $this->queue] as $queue) {
+            while (! $queue->isEmpty()) {
+                $queue->dequeue()->deferred->reject($closed);
+            }
         }
 
         $this->notifyIdle();
@@ -904,7 +914,7 @@ final class Connection implements Publisher
 
     private function notifyIdle(): void
     {
-        if ($this->idleWaiters === [] || $this->inFlight !== [] || ! $this->queue->isEmpty()) {
+        if ($this->idleWaiters === [] || $this->inFlight !== [] || $this->queuedCount() > 0) {
             return;
         }
 

@@ -31,6 +31,9 @@ use function React\Promise\resolve;
  * by a replica that died are taken over with XAUTOCLAIM once they have been
  * idle for $claimIdleMs.
  *
+ * Entries of the first stream (when there are several) are published as
+ * urgent, ahead of the others still waiting on the connection.
+ *
  * At most $batchSize entries are in flight at once, and $maxRate (messages
  * per second) can pace publishing, so a large backlog does not flood the
  * broker. The blocking read has a Redis connection of its own, so it never
@@ -336,7 +339,8 @@ final class RedisStreamsOutbox implements Outbox
         }
 
         $this->inFlight[$key] = true;
-        $this->paced(fn (): PromiseInterface => $this->send($message))->then(
+        $urgent = count($this->streams) > 1 && $stream === $this->streams[0];
+        $this->paced(fn (): PromiseInterface => $this->send($message, $urgent))->then(
             function () use ($stream, $id, $key, $message): void {
                 $this->acknowledge($stream, $id);
                 $this->observer?->published($stream, $message, $message->enqueuedAtMs === null ? null : microtime(true) * 1000 - $message->enqueuedAtMs);
@@ -359,13 +363,13 @@ final class RedisStreamsOutbox implements Outbox
     /**
      * @return PromiseInterface<mixed>
      */
-    private function send(OutboxMessage $message): PromiseInterface
+    private function send(OutboxMessage $message, bool $urgent): PromiseInterface
     {
         if ($this->publisher === null) {
             throw new RuntimeException('The outbox is not started.');
         }
 
-        return $this->publisher->publish($message->topic, $message->payload, $message->qos, $message->retain, $message->properties);
+        return $this->publisher->publish($message->topic, $message->payload, $message->qos, $message->retain, $message->properties, $urgent);
     }
 
     /**

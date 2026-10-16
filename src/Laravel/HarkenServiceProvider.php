@@ -36,6 +36,7 @@ final class HarkenServiceProvider extends ServiceProvider
             $routes = $config->get('harken.routes');
             $redis = $config->get('harken.outbox.redis', 'default');
             $stream = $config->get('harken.outbox.streams.normal', 'harken:outbox:normal');
+            $urgent = $config->get('harken.outbox.streams.urgent', 'harken:outbox:urgent');
 
             return new HarkenManager(
                 new Router,
@@ -45,6 +46,7 @@ final class HarkenServiceProvider extends ServiceProvider
                     new StoreConfig($config),
                     is_string($redis) ? $redis : 'default',
                     is_string($stream) ? $stream : 'harken:outbox:normal',
+                    is_string($urgent) ? $urgent : 'harken:outbox:urgent',
                 ),
                 is_string($routes) ? $routes : null,
             );

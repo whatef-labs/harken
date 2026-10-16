@@ -89,10 +89,17 @@ final class RecordingPublisher implements Publisher
 
     public bool $hold = false;
 
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface
+    /** @var list<string> Topics published as urgent. */
+    public array $urgent = [];
+
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null, bool $urgent = false): PromiseInterface
     {
         $message = new OutboxMessage($topic, $payload, $qos, $retain, null, $properties ?? new Properties);
         $this->published[] = $message;
+
+        if ($urgent) {
+            $this->urgent[] = $topic;
+        }
 
         if ($this->answer !== null) {
             return ($this->answer)($message);
@@ -226,7 +233,8 @@ it('serves the urgent stream before a normal backlog', function () {
     $outbox->start(Loop::get(), $publisher);
     outbox_wait(fn () => count($publisher->published) === 51);
 
-    expect($publisher->topics()[0])->toBe('door/open');
+    expect($publisher->topics()[0])->toBe('door/open')
+        ->and($publisher->urgent)->toBe(['door/open']);
 });
 
 it('keeps at most one batch in flight', function () {
@@ -315,15 +323,21 @@ it('queues publishes made outside the runtime in the application Redis, with its
     config()->set('database.redis.default.port', getenv('HARKEN_TEST_REDIS_PORT') ?: 6379);
     config()->set('database.redis.options.prefix', 'app_it_');
     config()->set('harken.outbox.streams.normal', $stream = 'harken-it:'.bin2hex(random_bytes(4)).':delegate');
+    config()->set('harken.outbox.streams.urgent', "{$stream}:urgent");
 
     $id = await(Harken::publish('cmd/door', "open\x00", 1, false, new Properties(contentType: 'text/plain')));
 
-    [$outbox, $redis] = outbox(streams: ["app_it_{$stream}:urgent", "app_it_{$stream}"]);
+    [$outbox] = outbox(streams: ["app_it_{$stream}:urgent", "app_it_{$stream}"]);
     $publisher = new RecordingPublisher;
     $outbox->start(Loop::get(), $publisher);
     outbox_wait(fn () => $publisher->published !== []);
 
-    expect($id)->toMatch('/^\d+-\d+$/')
+    $urgentId = await(Harken::urgent()->publish('cmd/alarm', 'now', 1));
+    outbox_wait(fn () => count($publisher->published) === 2);
+
+    expect($urgentId)->toMatch('/^\d+-\d+$/')
+        ->and($publisher->urgent)->toBe(['cmd/alarm'])
+        ->and($id)->toMatch('/^\d+-\d+$/')
         ->and($publisher->published[0]->topic)->toBe('cmd/door')
         ->and($publisher->published[0]->payload)->toBe("open\x00")
         ->and($publisher->published[0]->properties->contentType)->toBe('text/plain');

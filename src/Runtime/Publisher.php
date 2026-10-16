@@ -15,7 +15,8 @@ interface Publisher
 {
     /**
      * @param  Properties|null  $properties  MQTT 5 message properties; dropped on MQTT 3.1.1 connections.
+     * @param  bool  $urgent  Send ahead of messages that are not urgent and still waiting.
      * @return PromiseInterface<mixed>
      */
-    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null): PromiseInterface;
+    public function publish(string $topic, string $payload, int $qos = 0, bool $retain = false, ?Properties $properties = null, bool $urgent = false): PromiseInterface;
 }
