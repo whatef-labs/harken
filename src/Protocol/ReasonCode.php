@@ -65,6 +65,42 @@ enum ReasonCode: int
     }
 
     /**
+     * The MQTT 5 equivalent of an MQTT 3.1.1 CONNACK return code (§3.2.2.3),
+     * or null when the code is not defined.
+     */
+    public static function fromConnAckReturnCode(int $code): ?self
+    {
+        return match ($code) {
+            0 => self::Success,
+            1 => self::UnsupportedProtocolVersion,
+            2 => self::ClientIdentifierNotValid,
+            3 => self::ServerUnavailable,
+            4 => self::BadUserNameOrPassword,
+            5 => self::NotAuthorized,
+            default => null,
+        };
+    }
+
+    /**
+     * The MQTT 3.1.1 CONNACK return code for this reason, or null when 3.1.1
+     * has none.
+     *
+     * @return int<0, 5>|null
+     */
+    public function connAckReturnCode(): ?int
+    {
+        return match ($this) {
+            self::Success => 0,
+            self::UnsupportedProtocolVersion => 1,
+            self::ClientIdentifierNotValid => 2,
+            self::ServerUnavailable => 3,
+            self::BadUserNameOrPassword => 4,
+            self::NotAuthorized => 5,
+            default => null,
+        };
+    }
+
+    /**
      * For logs, e.g. "0x87 not authorized".
      */
     public function describe(): string

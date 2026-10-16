@@ -244,21 +244,9 @@ final class BinsoulCodec implements Codec
         return $seconds;
     }
 
-    /**
-     * MQTT 3.1.1 CONNACK return codes (§3.2.2.3) and their MQTT 5 equivalents.
-     */
-    private const array CONNACK_CODES = [
-        0 => ReasonCode::Success,
-        1 => ReasonCode::UnsupportedProtocolVersion,
-        2 => ReasonCode::ClientIdentifierNotValid,
-        3 => ReasonCode::ServerUnavailable,
-        4 => ReasonCode::BadUserNameOrPassword,
-        5 => ReasonCode::NotAuthorized,
-    ];
-
     private static function connAckReason(int $code): ReasonCode
     {
-        return self::CONNACK_CODES[$code] ?? throw new ProtocolException("Invalid CONNACK return code [{$code}].");
+        return ReasonCode::fromConnAckReturnCode($code) ?? throw new ProtocolException("Invalid CONNACK return code [{$code}].");
     }
 
     /**
@@ -266,13 +254,8 @@ final class BinsoulCodec implements Codec
      */
     private static function connAckReturnCode(ReasonCode $reason): int
     {
-        $code = array_search($reason, self::CONNACK_CODES, true);
-
-        if ($code === false) {
-            throw new ProtocolException("Reason code {$reason->describe()} has no MQTT 3.1.1 CONNACK equivalent.");
-        }
-
-        return $code;
+        return $reason->connAckReturnCode()
+            ?? throw new ProtocolException("Reason code {$reason->describe()} has no MQTT 3.1.1 CONNACK equivalent.");
     }
 
     /**
