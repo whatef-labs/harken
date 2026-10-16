@@ -7,12 +7,15 @@
 #
 # ext-uv is installed but not enabled; add `-d extension=uv` to a php
 # command to run on the libuv loop instead of stream_select.
+#
+# mosquitto-clients provides an independent MQTT 5 client for the interop
+# integration tests.
 
 ARG PHP_VERSION=8.5
 FROM php:${PHP_VERSION}-cli
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git unzip libpq-dev libuv1-dev \
+    && apt-get install -y --no-install-recommends git unzip libpq-dev libuv1-dev mosquitto-clients \
     && docker-php-ext-install pcntl pgsql pdo_pgsql sockets \
     && pecl install redis \
     && docker-php-ext-enable redis \

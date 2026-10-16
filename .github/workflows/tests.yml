@@ -71,6 +71,9 @@ jobs:
 
       - run: composer update --prefer-dist --no-interaction --no-progress
 
+      - name: Install mosquitto clients for MQTT 5 interop tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mosquitto-clients
+
       - name: Integration tests
         run: vendor/bin/pest --group=integration
         env:
