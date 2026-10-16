@@ -161,3 +161,29 @@ it('ignores the stale heartbeat of a process its host has replaced', function ()
         ->and($health->problem($statuses[1], $now))->toStartWith('no heartbeat for')
         ->and(Cache::store('array')->get(HealthStore::INDEX))->toHaveCount(2);
 });
+
+it('runs leader timers once this replica leads, and broadcast timers regardless', function () {
+    config()->set('harken.routes', __DIR__.'/missing.php');
+    app()->forgetInstance(HarkenManager::class);
+    $runs = ['leader' => 0, 'broadcast' => 0];
+    Harken::every(1, function () use (&$runs) {
+        $runs['leader']++;
+    });
+    Harken::every(1, function () use (&$runs) {
+        $runs['broadcast']++;
+    })->broadcast();
+
+    [$runtime, $broker, $loop] = built_runtime();
+    $runtime->start();
+    $broker->use(0)->accept();
+    $loop->advance(3.0);
+
+    expect($runtime->leadership?->isLeader())->toBeTrue()
+        ->and($runtime->leadership?->connection())->toBeNull()
+        ->and($runs)->toBe(['leader' => 3, 'broadcast' => 3]);
+
+    $runtime->leadership?->stop();
+    $loop->advance(3.0);
+
+    expect($runs)->toBe(['leader' => 3, 'broadcast' => 6]);
+});

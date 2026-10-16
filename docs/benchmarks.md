@@ -4,7 +4,7 @@ Runs of real `harken:start` processes against the stack in `docker/compose.yml` 
 
 ## Leader takeover
 
-`php tests/E2E/takeover.php kill|term` starts two replicas with a leader route (lease 5 s, Redis lock), publishes QoS 1 messages at 100 per second for 12 s, and stops the leader 3 s in.
+`php tests/E2E/takeover.php kill|term` starts two replicas with a leader route (lease 5 s, Redis lock), publishes QoS 1 messages at 100 per second for 12 s, and stops the leader 3 s in. Each replica also has a leader timer.
 
 | Protocol | Leader stopped by | Runs | Lost | Received twice | Both receiving at once | Takeover after the stop |
 |---|---|---|---|---|---|---|
@@ -15,6 +15,7 @@ Runs of real `harken:start` processes against the stack in `docker/compose.yml` 
 
 - After a crash the standby takes over when the lease runs out; the broker keeps queuing QoS 1 messages in the leader session meanwhile, and the new leader receives them on connect.
 - A graceful stop releases the lock at once, so the standby takes over within its 0.25 s retry interval.
+- A leader timer (`Harken::every(0.2, …)`, leader by default) ran on the first leader until it stopped and on the new leader from the takeover on, never on both at once.
 - The queue of a disconnected session is bounded by the broker (EMQX `mqtt.max_mqueue_len`, 1000 by default). At 100 messages per second a 5 s takeover queues about 500; size the queue for the inbound rate times the takeover time.
 
 ## Life cycle

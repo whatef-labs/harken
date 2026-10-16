@@ -21,7 +21,8 @@ Harken::topic('sensors/{id}/status', StatusHandler::class)
 
 Harken::topic('config/changed', RefreshCache::class)->broadcast(); // every replica
 
-Harken::every(5, fn () => /* sweep pending work */ null);
+Harken::every(5, fn () => /* sweep pending work */ null);           // the leader replica only
+Harken::every(60, fn () => /* refresh a local cache */ null)->broadcast(); // every replica
 ```
 
 | Method | Signature | Status |
@@ -32,7 +33,7 @@ Harken::every(5, fn () => /* sweep pending work */ null);
 | `Route::leader` | `leader(): static` — only the elected leader replica subscribes (default) | stable |
 | `Route::shared` | `shared(string $group): static` — MQTT shared subscription group | stable |
 | `Route::broadcast` | `broadcast(): static` — every replica subscribes | stable |
-| `Harken::every` | `every(int\|float $seconds, callable $callback): void` | stable |
+| `Harken::every` | `every(int\|float $seconds, callable $callback): Task` — `->leader()` (default), `->broadcast()` | stable |
 | `Harken::listen` | `listen(string $channel, string\|callable $handler): NotificationRoute` — PostgreSQL NOTIFY; `->leader()` (default), `->broadcast()`, `->queued()` | stable |
 
 ### Topic patterns
@@ -53,6 +54,7 @@ Running several replicas of `harken:start` keeps the runtime available through d
 | `broadcast()` | every replica | refreshing a per-process cache or setting | the work is repeated on every replica |
 
 - Publishing is not affected: every replica publishes, whatever the distribution of its routes.
+- The same rule applies to `Harken::every()` timers and `Harken::listen()` channels: by default only the leader runs them, so a periodic sweep of pending work runs once, not once per replica; `->broadcast()` runs them on every replica. A leader timer starts when the replica becomes leader and stops when it stops leading, and a run is skipped once its lease has run out.
 - **Leader.** The leader holds a lease (Redis by default) and opens a second connection with a fixed client id, clean start off and a session expiry, so the broker keeps queuing QoS 1 messages while the leader changes and the next leader receives them. Two processes can never receive on that client id at once: the broker closes the older connection, and a leader whose lease ran out closes its connection before handling another message. QoS 0 messages sent while no leader is connected are lost. The broker bounds the queue of a disconnected session (EMQX: `mqtt.max_mqueue_len`, 1000 by default) and drops QoS 1 messages beyond it without telling anyone, so size it for the inbound rate times the takeover time.
   - Settings live under `leader` in each connection of `config/harken.php`: the lock (`redis` by default, `pgsql` for a PostgreSQL 14+ advisory lock with ext-pgsql, or `none` for a single replica), the lease (5 s), the retry interval (0.25 s) and the session expiry (300 s). The leader client id defaults to `{client_id_prefix}-leader`; the prefix defaults to the application name.
   - A standby replica takes over within the lease after a crash, and within the retry interval after a graceful stop, because a stopping leader releases the lock at once.

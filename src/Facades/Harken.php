@@ -15,7 +15,7 @@ use Whatef\Harken\Runtime\Routing\HandlerInvoker;
  * @method static \React\Promise\PromiseInterface<mixed> clearRetained(string $topic)
  * @method static \Whatef\Harken\Laravel\UrgentPublisher urgent()
  * @method static \Whatef\Harken\Runtime\Sources\NotificationRoute listen(string $channel, string|callable $handler)
- * @method static void every(int|float $seconds, callable $callback)
+ * @method static \Whatef\Harken\Runtime\Timers\Task every(int|float $seconds, callable $callback)
  * @method static void simulate(string $topic, string $payload, int $qos = 0, bool $retain = false, ?\Whatef\Harken\Protocol\Properties $properties = null)
  * @method static void assertPublished(string $topic, ?callable $callback = null)
  * @method static void assertNotPublished(string $topic, ?callable $callback = null)

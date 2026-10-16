@@ -12,6 +12,7 @@ declare(strict_types=1);
  * seconds in, and checks that:
  *   - no message is lost,
  *   - the two replicas never received at the same time,
+ *   - the leader timer ran on one replica at a time,
  *   - the standby took over within the lease (SIGKILL) or within a second
  *     (SIGTERM, which releases the lock at once).
  *
@@ -139,15 +140,25 @@ proc_close($a);
 proc_close($b);
 $publisher->disconnect();
 
-// Analyse: pid seq time per line.
+// Analyse: "pid seq time" per message, "pid timer time" per timer run.
 $received = [];
 $byPid = [];
+$timers = [];
 
 foreach (file($log, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
     [$pid, $seq, $time] = explode(' ', $line);
+
+    if ($seq === 'timer') {
+        $timers[(int) $pid][] = (float) $time;
+
+        continue;
+    }
+
     $received[(int) $seq][] = (int) $pid;
     $byPid[(int) $pid][] = (float) $time;
 }
+
+$timerOverlap = isset($timers[$pidA], $timers[$pidB]) && min($timers[$pidB]) < max($timers[$pidA]);
 
 $lost = array_values(array_diff(range(0, $total - 1), array_keys($received)));
 $duplicates = count(array_filter($received, static fn (array $pids): bool => count($pids) > 1));
@@ -166,6 +177,9 @@ $result = [
     'received_by_a' => count($byPid[$pidA] ?? []),
     'received_by_b' => count($byPid[$pidB] ?? []),
     'overlap' => $overlap,
+    'timer_runs_a' => count($timers[$pidA] ?? []),
+    'timer_runs_b' => count($timers[$pidB] ?? []),
+    'timer_overlap' => $timerOverlap,
     'gap_seconds' => $lastA === null || $firstB === null ? null : round($firstB - $lastA, 3),
     'takeover_after_stop_seconds' => $takeover === null ? null : round($takeover, 3),
     'b_exit_status' => $status['exitcode'] ?? null,
@@ -175,7 +189,8 @@ $result = [
 echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
 
 $limit = $mode === 'term' ? 1.0 : $lease + 1.0;
-$pass = $lost === [] && ! $overlap && $takeover !== null && $takeover <= $limit;
+$pass = $lost === [] && ! $overlap && ! $timerOverlap && isset($timers[$pidA], $timers[$pidB])
+    && $takeover !== null && $takeover <= $limit;
 
 echo $pass ? "PASS\n" : "FAIL\n";
 exit($pass ? 0 : 1);

@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use React\EventLoop\StreamSelectLoop;
+use Whatef\Harken\Runtime\Routing\Distribution;
 use Whatef\Harken\Runtime\Timers\Scheduler;
+use Whatef\Harken\Tests\Support\FakeLoop;
 
 it('runs callbacks periodically on the loop', function () {
     $loop = new StreamSelectLoop;
@@ -55,3 +57,35 @@ it('stops all timers', function () {
 it('rejects non-positive intervals', function () {
     (new Scheduler)->every(0, fn () => null);
 })->throws(InvalidArgumentException::class);
+
+it('runs tasks on the leader by default, or on every replica', function () {
+    $scheduler = new Scheduler;
+    $sweep = $scheduler->every(5, fn () => null);
+    $refresh = $scheduler->every(60, fn () => null)->broadcast();
+
+    expect($sweep->getDistribution())->toBe(Distribution::Leader)
+        ->and($refresh->getDistribution())->toBe(Distribution::Broadcast)
+        ->and($sweep->interval)->toBe(5.0)
+        ->and($scheduler->only(Distribution::Leader)->tasks())->toBe([$sweep])
+        ->and($scheduler->only(Distribution::Broadcast)->tasks())->toBe([$refresh])
+        ->and($refresh->leader()->getDistribution())->toBe(Distribution::Leader);
+});
+
+it('skips runs while its guard says no', function () {
+    $loop = new FakeLoop;
+    $scheduler = new Scheduler;
+    $runs = 0;
+    $allowed = false;
+    $scheduler->every(1, function () use (&$runs) {
+        $runs++;
+    });
+
+    $scheduler->start($loop, fn () => null, function () use (&$allowed) {
+        return $allowed;
+    });
+    $loop->advance(2.0);
+    $allowed = true;
+    $loop->advance(2.0);
+
+    expect($runs)->toBe(2);
+});

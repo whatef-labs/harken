@@ -34,6 +34,7 @@ use Whatef\Harken\Runtime\Sources\NotificationInvoker;
 use Whatef\Harken\Runtime\Sources\NotificationObserver;
 use Whatef\Harken\Runtime\Sources\NotificationRouter;
 use Whatef\Harken\Runtime\Sources\PgNotifySource;
+use Whatef\Harken\Runtime\Timers\Scheduler;
 use Whatef\Harken\Transport\Transport;
 
 /**
@@ -45,7 +46,8 @@ use Whatef\Harken\Transport\Transport;
  * - Leader routes and leader NOTIFY channels follow the election: the leader
  *   opens a second connection with the fixed leader client id and listens
  *   on PostgreSQL while its lease holds.
- * - Broadcast NOTIFY channels are listened to by every replica.
+ * - Broadcast NOTIFY channels are listened to, and broadcast timers run, on
+ *   every replica; leader timers run only while this replica leads.
  * - The outbox publishes what the application queued outside the runtime.
  */
 final class RuntimeBuilder
@@ -110,14 +112,15 @@ final class RuntimeBuilder
 
         $replicaRoutes = $router->only(Distribution::Shared, Distribution::Broadcast);
         $connection = $this->connection('main', $options, $replicaRoutes, $transport, $loop, $logger);
-        $leadership = $this->leadership($connectionConfig, $options, $router->only(Distribution::Leader), $notifications->only(Distribution::Leader), $transport, $loop, $logger, $invoker, $observer, $threshold);
+        $scheduler = $this->harken->scheduler();
+        $leadership = $this->leadership($connectionConfig, $options, $router->only(Distribution::Leader), $notifications->only(Distribution::Leader), $scheduler->only(Distribution::Leader), $transport, $loop, $logger, $invoker, $observer, $threshold);
         $broadcast = $notifications->only(Distribution::Broadcast);
 
         $runtime = new Runtime(
             loop: $loop,
             connection: $connection,
             dispatcher: new Dispatcher($replicaRoutes, $invoker, $observer, $threshold),
-            scheduler: $this->harken->scheduler(),
+            scheduler: $scheduler->only(Distribution::Broadcast),
             observer: $logger,
             options: new RuntimeOptions(
                 graceSeconds: $this->float('harken.shutdown.grace', 10.0),
@@ -161,6 +164,7 @@ final class RuntimeBuilder
         ConnectionOptions $options,
         Router $routes,
         NotificationRouter $notifications,
+        Scheduler $tasks,
         Transport $transport,
         LoopInterface $loop,
         RuntimeLogger $logger,
@@ -168,7 +172,7 @@ final class RuntimeBuilder
         CountingDispatchObserver $observer,
         float $threshold,
     ): ?Leadership {
-        if ($routes->routes() === [] && $notifications->routes() === []) {
+        if ($routes->routes() === [] && $notifications->routes() === [] && $tasks->count() === 0) {
             return null;
         }
 
@@ -202,6 +206,13 @@ final class RuntimeBuilder
                 $this->leaderSource?->stop();
                 $this->leaderSource = null;
             });
+        }
+
+        if ($tasks->count() > 0) {
+            $leadership->onTerm(
+                fn () => $tasks->start($loop, $logger->error(...), $leadership->holdsLease(...)),
+                fn () => $tasks->stop(),
+            );
         }
 
         return $leadership;

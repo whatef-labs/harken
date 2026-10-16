@@ -12,6 +12,7 @@ use Whatef\Harken\Runtime\Routing\Router;
 use Whatef\Harken\Runtime\Sources\NotificationRoute;
 use Whatef\Harken\Runtime\Sources\NotificationRouter;
 use Whatef\Harken\Runtime\Timers\Scheduler;
+use Whatef\Harken\Runtime\Timers\Task;
 use Whatef\Harken\Runtime\Topic;
 
 /**
@@ -94,11 +95,14 @@ class HarkenManager
     }
 
     /**
+     * Runs a callback periodically. Only the leader replica runs it unless
+     * the task calls ->broadcast().
+     *
      * @param  callable(): mixed  $callback
      */
-    public function every(int|float $seconds, callable $callback): void
+    public function every(int|float $seconds, callable $callback): Task
     {
-        $this->scheduler->every($seconds, $callback);
+        return $this->scheduler->every($seconds, $callback);
     }
 
     public function router(): Router

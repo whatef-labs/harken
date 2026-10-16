@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Whatef\Harken\Runtime\Timers;
 
 use Closure;
-use InvalidArgumentException;
 use React\EventLoop\LoopInterface;
 use React\EventLoop\TimerInterface;
 use Throwable;
+use Whatef\Harken\Runtime\Routing\Distribution;
 
 /**
  * Periodic callbacks registered before the runtime starts (`Harken::every()`)
@@ -17,7 +17,7 @@ use Throwable;
  */
 final class Scheduler
 {
-    /** @var list<array{float, Closure(): mixed}> */
+    /** @var list<Task> */
     private array $tasks = [];
 
     /** @var list<TimerInterface> */
@@ -28,13 +28,9 @@ final class Scheduler
     /**
      * @param  callable(): mixed  $callback
      */
-    public function every(int|float $seconds, callable $callback): void
+    public function every(int|float $seconds, callable $callback): Task
     {
-        if ($seconds <= 0) {
-            throw new InvalidArgumentException('The interval must be greater than zero seconds.');
-        }
-
-        $this->tasks[] = [(float) $seconds, $callback(...)];
+        return $this->tasks[] = new Task($seconds, $callback);
     }
 
     public function count(): int
@@ -43,21 +39,56 @@ final class Scheduler
     }
 
     /**
-     * @param  callable(Throwable): void  $onError
+     * @return list<Task>
      */
-    public function start(LoopInterface $loop, callable $onError): void
+    public function tasks(): array
+    {
+        return $this->tasks;
+    }
+
+    /**
+     * A scheduler over the tasks with one of the given distributions. The
+     * runtime starts the leader tasks only while it leads.
+     */
+    public function only(Distribution ...$distributions): self
+    {
+        $subset = new self;
+
+        foreach ($this->tasks as $task) {
+            if (in_array($task->getDistribution(), $distributions, true)) {
+                $subset->tasks[] = $task;
+            }
+        }
+
+        return $subset;
+    }
+
+    /**
+     * @param  callable(Throwable): void  $onError
+     * @param  (callable(): bool)|null  $guard  Checked before every run; a run is skipped while it returns false.
+     */
+    public function start(LoopInterface $loop, callable $onError, ?callable $guard = null): void
     {
         $this->stop();
         $this->loop = $loop;
+        $guard = $guard === null ? null : $guard(...);
 
-        foreach ($this->tasks as [$interval, $callback]) {
-            $this->timers[] = $loop->addPeriodicTimer($interval, static function () use ($callback, $onError): void {
+        foreach ($this->tasks as $task) {
+            $callback = $task->callback;
+            /** @var Closure(): void $run */
+            $run = static function () use ($callback, $onError, $guard): void {
+                if ($guard !== null && ! $guard()) {
+                    return;
+                }
+
                 try {
                     $callback();
                 } catch (Throwable $e) {
                     $onError($e);
                 }
-            });
+            };
+
+            $this->timers[] = $loop->addPeriodicTimer($task->interval, $run);
         }
     }
 

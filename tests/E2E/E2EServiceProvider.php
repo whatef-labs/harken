@@ -15,7 +15,8 @@ use Whatef\Harken\Tests\E2E\Load\SlowReport;
  * Routes for end-to-end runs. Every message on E2E_TOPIC is appended to the
  * E2E_LOG file as "pid payload unix-time", so a test can tell which process
  * handled what and when. E2E_DISTRIBUTION picks leader (default), shared or
- * broadcast; E2E_HANDLER_MS makes the handler block for that long.
+ * broadcast; E2E_HANDLER_MS makes the handler block for that long. A
+ * leader timer logs "pid timer unix-time" five times a second.
  *
  * `e2e:publish {topic} {payload} {--urgent}` publishes through the facade,
  * which outside the runtime means the outbox.
@@ -59,5 +60,10 @@ final class E2EServiceProvider extends ServiceProvider
             'broadcast' => $route->broadcast(),
             default => $route->leader(),
         };
+
+        // A leader timer (the default for Harken::every()) logs "pid timer time".
+        Harken::every(0.2, static function () use ($log): void {
+            file_put_contents($log, sprintf("%d timer %.6f\n", getmypid(), microtime(true)), FILE_APPEND | LOCK_EX);
+        });
     }
 }
