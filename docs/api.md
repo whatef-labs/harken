@@ -95,8 +95,8 @@ The payload stays byte-for-byte identical through queue serialization.
 |---|---|---|
 | `Harken::fake` | `fake(): HarkenFake` | stable |
 | `Harken::assertPublished` | `assertPublished(string $topic, ?callable $callback = null): void` — callback receives `(string $payload, int $qos, bool $retain)` and returns bool | stable |
-| `Harken::assertNotPublished` | `assertNotPublished(string $topic, ?callable $callback = null): void` | draft |
-| `Harken::assertNothingPublished` | `assertNothingPublished(): void` | draft |
+| `Harken::assertNotPublished` | `assertNotPublished(string $topic, ?callable $callback = null): void` | stable |
+| `Harken::assertNothingPublished` | `assertNothingPublished(): void` | stable |
 | `Harken::simulate` | `simulate(string $topic, string $payload, int $qos = 0, bool $retain = false): void` | stable |
 
 `simulate()` sends the message through the same router the runtime uses:
