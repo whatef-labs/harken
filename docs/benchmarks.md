@@ -24,6 +24,30 @@ The throughput and latency runs (inbound, outbox, isolation) connect to the EMQX
 
 `php tests/E2E/lifecycle.php`: `harken:status` is healthy while a runtime runs and fails once none does; `Harken::publish()` from another process goes through the outbox to the broker; `harken:restart` stops the runtime gracefully (exit code 0) within the restart check interval; `--max-time` stops it by itself.
 
+## Broker outage
+
+`php tests/E2E/outage.php network|broker 30`: one replica with a leader route receives QoS 1 messages at 20 per second, then loses the broker for 30 s.
+
+- `network`: the replica reaches the broker through a TCP proxy, which drops every connection and turns new ones away for 30 s. The broker keeps running, and a retained message is published to it during the outage.
+- `broker`: the EMQX container is stopped for 30 s and started again, losing every session; a retained message is published as soon as it is back.
+
+| Outage | Machine | Retained message received after the broker is back | Lost |
+|---|---|---|---|
+| network | x86_64 VM | 14.9 s | 0 of 1 057, including those sent during the outage |
+| network | aarch64 | 19.0 s | 0 |
+| broker restart | x86_64 VM | 25.6 s | 0 from the resubscription on |
+| broker restart | aarch64 | 12.4 s | 0 from the resubscription on |
+
+- The replica kept running throughout and reconnected on its own; the time after the broker is back is the reconnect backoff (1 s doubling to 60 s, with jitter), so it varies from run to run and stays under a minute.
+- While the network is down the broker queues the QoS 1 messages in the leader's persistent session, and the replica receives all of them on reconnect (up to `mqtt.max_mqueue_len`, 1 000 by default).
+- A broker restart without durable sessions loses the session: messages published before the replica subscribed again had no subscriber. `harken.connections.*.reconnect.max_delay` shortens that window.
+
+## Linux aarch64
+
+The same checks on an Oracle Cloud Ampere A1 instance (Neoverse-N1, 4 cores, 24 GB, Ubuntu 24.04, Docker 29) with the image from `docker/php` built for arm64 (PHP 8.5): 437 unit and 39 integration tests pass; leader takeover loses nothing (SIGKILL 5.0 s, SIGTERM 0.24 s); the life cycle and both outages pass. With ext-uv loaded (`ExtUvLoop`) the unit tests, takeovers, life cycle and outages pass as well.
+
+`bench.php inbound 10000 10 2` on that instance, broker and generators on the same four cores: 0 of 100 000 lost, latency p50 1.74 ms, p99 8.52 ms, 56 % of one core, 59 MB RSS.
+
 ## Inbound throughput and latency
 
 `php tests/E2E/bench.php inbound <rate> 10 <generators>`: one runtime process with a leader route; generator processes publish QoS 1 device reports of about 400 bytes over 1 000 topics for 10 s, each stamped with the time it was published. The handler parses the JSON, checks an HMAC-SHA256 signature, updates per-device state in memory, and samples every 100th latency from the broker publish to the handler.

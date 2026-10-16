@@ -34,7 +34,7 @@ Harken::urgent()->publish("devices/{$id}/command", json_encode(['open' => true])
 
 ## Requirements
 
-- PHP 8.4 or 8.5 and Laravel 12 or 13. No PHP extension is required; ext-pcntl (signals), ext-pgsql (NOTIFY without polling) and ext-uv are used when present.
+- PHP 8.4 or 8.5 and Laravel 12 or 13, on Linux x86_64 or aarch64 (both tested in Docker). No PHP extension is required; ext-pcntl (signals), ext-pgsql (NOTIFY without polling) and ext-uv are used when present.
 - An MQTT broker. Harken is tested against EMQX 5.8 and with Mosquitto clients.
 - Redis for publishing from outside the runtime and for the leader lock (or PostgreSQL 14+ for the lock).
 
@@ -145,6 +145,7 @@ Measured with real `harken:start` processes on a small virtual machine: **2 vCPU
 | A command published while receiving 10,000 msg/s and a handler blocks for 50 ms five times a second | **p99 3.4 ms** with the slow handler `->queued()` (34 ms inline; 50 ms in a synchronous MQTT loop doing the same work) |
 | Leader replica stopped by a deployment (SIGTERM) | standby receiving after **0.13 s**, no QoS 1 message lost |
 | Leader replica killed (SIGKILL) | standby receiving after **5.1 s** (the 5 s lease), no QoS 1 message lost |
+| Broker unreachable for 30 s | reconnects on its own, **no QoS 1 message lost**, a retained message published meanwhile arrives |
 | MQTT 5 codec, 400-byte PUBLISH | 474,000 decoded/s, 587,000 encoded/s |
 
 These numbers are a floor rather than a ceiling. At 20,000 messages per second the machine had no idle CPU left: the broker and the generators used most of it, the runtime about a third of one core, and the broker started dropping messages. A runtime process spends roughly 27 µs of CPU per message at 10,000 msg/s, handler included. Method, every run and the scripts are in [docs/benchmarks.md](docs/benchmarks.md).
