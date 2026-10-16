@@ -37,6 +37,21 @@ final class E2EServiceProvider extends ServiceProvider
             return;
         }
 
+        // bench.php: what Harken::publish() costs a web request (one XADD each).
+        Artisan::command('e2e:publish-bench {count=10000}', function (string $count): void {
+            $samples = [];
+
+            for ($i = 0; $i < (int) $count; $i++) {
+                $start = hrtime(true);
+                Harken::publish("bench/cmd/{$i}", '{"open":true}', 1);
+                $samples[] = (hrtime(true) - $start) / 1e6;
+            }
+
+            sort($samples);
+            $pick = static fn (float $p): float => round($samples[(int) min(count($samples) - 1, floor($p * count($samples)))], 3);
+            $this->line((string) json_encode(['calls' => count($samples), 'p50_ms' => $pick(0.5), 'p99_ms' => $pick(0.99), 'max_ms' => round(end($samples), 3)]));
+        });
+
         $topic = (string) (getenv('E2E_TOPIC') ?: 'harken-e2e/+/up');
         $log = (string) (getenv('E2E_LOG') ?: sys_get_temp_dir().'/harken-e2e.log');
         $blockMs = (int) (getenv('E2E_HANDLER_MS') ?: 0);

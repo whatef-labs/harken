@@ -1,6 +1,8 @@
 # End-to-end checks and measurements
 
-Runs of real `harken:start` processes against the stack in `docker/compose.yml` (EMQX 5.8.9, Redis 7.4, PostgreSQL 17) on one test VM (Ubuntu 24.04, 2 vCPU, PHP 8.5, `StreamSelectLoop`). The broker, Redis, the load generator and the processes under test share the two cores. Scripts live in [`tests/E2E`](../tests/E2E); they boot a bare Laravel application through Orchestra Testbench (`php tests/E2E/artisan harken:start`).
+Runs of real `harken:start` processes against the stack in `docker/compose.yml` (EMQX 5.8.9, Redis 7.4, PostgreSQL 17) on one test VM: Proxmox guest, **2 vCPU, 3.8 GB RAM**, Ubuntu 24.04, PHP 8.5 CLI with `StreamSelectLoop` (no ext-uv). The broker, Redis, the load generators and the processes under test share the two cores, so every figure below is a floor for one runtime process, not its limit. Scripts live in [`tests/E2E`](../tests/E2E); they boot a bare Laravel application through Orchestra Testbench (`php tests/E2E/artisan harken:start`).
+
+The throughput and latency runs (inbound, outbox, isolation) connect to the EMQX container's address on the Docker bridge. Going through the published port adds Docker's userland proxy, which took 18 % of the VM's CPU at 15 000 messages per second.
 
 ## Leader takeover
 
@@ -22,9 +24,51 @@ Runs of real `harken:start` processes against the stack in `docker/compose.yml` 
 
 `php tests/E2E/lifecycle.php`: `harken:status` is healthy while a runtime runs and fails once none does; `Harken::publish()` from another process goes through the outbox to the broker; `harken:restart` stops the runtime gracefully (exit code 0) within the restart check interval; `--max-time` stops it by itself.
 
+## Inbound throughput and latency
+
+`php tests/E2E/bench.php inbound <rate> 10 <generators>`: one runtime process with a leader route; generator processes publish QoS 1 device reports of about 400 bytes over 1 000 topics for 10 s, each stamped with the time it was published. The handler parses the JSON, checks an HMAC-SHA256 signature, updates per-device state in memory, and samples every 100th latency from the broker publish to the handler.
+
+| Inbound / s | Generators | Lost | Latency p50 | p99 | max | Runtime CPU | Runtime RSS |
+|---|---|---|---|---|---|---|---|
+| 10 000 | 2 | 0 / 100 000 | 1.09 ms | 3.17 ms | 7.24 ms | 27.1 % | 55 MB |
+| 15 000 | 2 | 0 / 150 000 | 1.56 ms | 26.5 ms | 33.7 ms | 34.4 % | 55 MB |
+| 20 000 | 2 | 18 285 / 200 000 | 2.57 ms | 378 ms | 402 ms | 36.6 % | 56 MB |
+
+- Up to 15 000 messages per second every message reached its handler.
+- At 20 000 the VM had no idle CPU: EMQX alone used about half of it, the generators most of the rest, and the runtime about a third of one core. The broker's session queue for the runtime filled up (`max_inflight` 32 + `max_mqueue_len` 1 000 by default) and EMQX dropped the overflow, which its `delivery.dropped.queue_full` counter matched exactly. The limit here is the machine, not the runtime process, which was still below 40 % of one core.
+- The runtime spends about 27 µs of CPU per message at 10 000 per second, handler included, and its memory stays flat at 55 MB RSS (`memory_get_usage(true)`: 30 MB).
+
+## Outbox throughput
+
+`php tests/E2E/bench.php outbox 50000`: with a runtime running, 50 000 entries are queued in the outbox stream at once (0.3 s with a pipelined client), and the run ends when the stream is empty. Each entry is published QoS 1, acknowledged by the broker, then acknowledged and deleted in Redis.
+
+| Entries | Drained in | Published / s | Runtime CPU |
+|---|---|---|---|
+| 50 000 | 2.97 s | 16 825 | 71 % |
+| 50 000 | 2.81 s | 17 823 | 74 % |
+
+At most `harken.outbox.batch` (100) entries are in flight at once; `harken.outbox.max_rate` can lower the pace.
+
+## Publishing from a request
+
+`php tests/E2E/artisan e2e:publish-bench 10000` calls `Harken::publish()` outside the runtime 10 000 times, as a web request would: one `XADD` on the application's Redis connection (phpredis, Redis on the same machine).
+
+| Calls | p50 | p99 | max |
+|---|---|---|---|
+| 10 000 | 0.071 ms | 0.108 ms | 2.2 ms |
+
+## MQTT codec
+
+A 400-byte QoS 1 PUBLISH, encoded and decoded 100 000 times on the VM (`MQTT 5 + properties` adds a content type and a user property):
+
+| Codec | Encode / s | Decode / s |
+|---|---|---|
+| MQTT 3.1.1 (binsoul/net-mqtt) | 671 000 | 301 000 |
+| MQTT 5 (Harken) | 587 000 | 474 000 |
+| MQTT 5 + properties | 247 000 | 142 000 |
 ## Latency isolation under load
 
-`php tests/E2E/load.php inline|queued|sync <rate>` follows the scenario of the requirements (§5.3):
+`php tests/E2E/load.php inline|queued|sync <rate>` measures what a slow handler does to publishing:
 
 - Devices send QoS 1 reports of about 400 bytes at 1 000, 3 000 and 10 000 messages per second over 1 000 topics, for 10 s. The handler parses the JSON, checks an HMAC-SHA256 signature and updates per-device state in memory.
 - Five reports per second go to a handler that blocks for 50 ms (standing in for database round trips or an external call).
@@ -37,19 +81,18 @@ Targets:
 
 | Inbound / s | Target | Inbound lost | Command latency p50 | p99 | max | CPU of the process |
 |---|---|---|---|---|---|---|
-| 1 000 | sync | 0 / 10 050 | 7.62 ms | 37.58 ms | 39.31 ms | 3.7 % |
-| 1 000 | inline | 0 / 10 050 | 0.83 ms | 30.23 ms | 33.92 ms | 3.7 % |
-| 1 000 | queued | 0 / 10 050 | 0.71 ms | **2.58 ms** | 2.68 ms | 4.4 % |
-| 3 000 | sync | 0 / 30 050 | 6.19 ms | 39.57 ms | 41.41 ms | 6.3 % |
-| 3 000 | inline | 0 / 30 050 | 0.84 ms | 33.74 ms | 34.90 ms | 7.5 % |
-| 3 000 | queued | 0 / 30 050 | 0.71 ms | **2.81 ms** | 4.42 ms | 8.1 % |
-| 10 000 | sync | 0 / 100 050 | 2.33 ms | 48.39 ms | 51.78 ms | 16.0 % |
-| 10 000 | inline | 0 / 100 050 | 1.41 ms | 35.15 ms | 43.89 ms | 20.2 % |
-| 10 000 | queued | 0 / 100 050 | 1.17 ms | **3.29 ms** | 4.16 ms | 22.9 % |
+| 1 000 | sync | 0 / 10 050 | 7.30 ms | 33.23 ms | 34.65 ms | 3.5 % |
+| 1 000 | inline | 0 / 10 050 | 0.79 ms | 31.84 ms | 34.25 ms | 4.3 % |
+| 1 000 | queued | 0 / 10 050 | 0.72 ms | **2.16 ms** | 5.15 ms | 5.2 % |
+| 10 000 | sync | 0 / 100 050 | 2.81 ms | 50.43 ms | 50.82 ms | 15.2 % |
+| 10 000 | inline | 0 / 100 050 | 1.12 ms | 34.22 ms | 34.72 ms | 20.2 % |
+| 10 000 | queued | 0 / 100 050 | 1.08 ms | **3.35 ms** | 5.00 ms | 22.7 % |
+
+An earlier series, through the published broker port, also measured 3 000 messages per second (p99: sync 39.6 ms, inline 33.7 ms, queued 2.8 ms) and found the same picture.
 
 No command was lost in any run. CPU is one core's worth (100 % = one core) over the 10 s of load.
 
-- **Queued slow handlers keep publishing fast.** With the 50 ms handler on a queue worker, the command latency p99 stays at 2.6 – 3.3 ms up to 10 000 inbound messages per second: the event loop never waits for it.
-- **Inline slow handlers delay everything behind them**, in Harken as in a synchronous loop: a command that arrives while a 50 ms handler runs waits for it, which sets the p99 at 30 – 35 ms. Harken still answers faster at the median (0.8 – 1.4 ms against 2.3 – 7.6 ms), because it does not poll and publishes without waiting for each PUBACK.
-- **No inbound message was lost** at any rate in any target: every process handled every message the generator sent. The broker's `delivery.dropped.queue_full` counter did not move in the last five runs. It did move during the first four, but for two leader sessions that earlier trial runs had left subscribed to the same topics, not for the processes measured; `load.php` now ends its leader session when it is done.
+- **Queued slow handlers keep publishing fast.** With the 50 ms handler on a queue worker, the command latency p99 stays at 2.2 – 3.4 ms up to 10 000 inbound messages per second: the event loop never waits for it.
+- **Inline slow handlers delay everything behind them**, in Harken as in a synchronous loop: a command that arrives while a 50 ms handler runs waits for it, which sets the p99 at 30 – 35 ms. Harken still answers faster at the median (0.8 – 1.1 ms against 2.8 – 7.3 ms), because it does not poll and publishes without waiting for each PUBACK.
+- **No inbound message was lost** at any rate in any target: every process handled every message the generator sent.
 - **CPU.** At 1 000 messages per second both use the same; at 3 000 and 10 000 Harken uses about 20 – 25 % more than the synchronous loop: it resolves each handler from the container and routes each message, where the loop calls one handler directly. Both stay around a fifth of a core at 10 000 messages per second.
