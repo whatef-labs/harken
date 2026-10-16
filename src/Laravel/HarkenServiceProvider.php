@@ -10,6 +10,7 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Log\LogManager;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use React\EventLoop\LoopInterface;
 use Whatef\Harken\Laravel\Console\RestartCommand;
@@ -18,6 +19,7 @@ use Whatef\Harken\Laravel\Console\StatusCommand;
 use Whatef\Harken\Laravel\Publishing\StreamsDelegatePublisher;
 use Whatef\Harken\Observability\LogContext;
 use Whatef\Harken\Observability\Metrics;
+use Whatef\Harken\Observability\MetricsRegistry;
 use Whatef\Harken\Observability\NullMetrics;
 use Whatef\Harken\Runtime\LoopFactory;
 use Whatef\Harken\Runtime\Routing\DispatchObserver;
@@ -56,7 +58,16 @@ final class HarkenServiceProvider extends ServiceProvider
             );
         });
 
-        $this->app->singleton(Metrics::class, NullMetrics::class);
+        $this->app->singleton(MetricsRegistry::class);
+        $this->app->singleton(Metrics::class, static function (Container $app): Metrics {
+            $driver = $app->make(Config::class)->get('harken.metrics.driver', 'null');
+
+            return match ($driver) {
+                'prometheus', 'log' => $app->make(MetricsRegistry::class),
+                null, 'null', '' => new NullMetrics,
+                default => throw new InvalidArgumentException('Unknown Harken metrics driver ['.(is_scalar($driver) ? $driver : '?').']; use null, prometheus or log.'),
+            };
+        });
         $this->app->bind(HandlerInvoker::class, ContainerHandlerInvoker::class);
         $this->app->bind(NotificationInvoker::class, ContainerHandlerInvoker::class);
         $this->app->bind(LoopInterface::class, static fn (): LoopInterface => LoopFactory::get());

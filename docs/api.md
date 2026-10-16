@@ -220,7 +220,56 @@ harken:
 - **Graceful stop.** SIGTERM or SIGINT (with ext-pcntl), `harken:restart`, `--memory` and `--max-time` stop the runtime in this order, within `harken.shutdown.grace` seconds: stop timers and NOTIFY sources, hold inbound messages (unacknowledged QoS 1 messages are delivered again after the connection closes), stop leading (DISCONNECT and release the lock, so a standby replica takes over at once), let the outbox finish the entries in flight, wait for the last PUBACKs, then DISCONNECT. The exit code is 0, so the process manager starts a fresh process. A failure the runtime cannot recover from (credentials refused, a subscription refused, the client id taken over) exits with 1.
 - **Restart for a deployment.** `php artisan harken:restart` sets a flag in the cache; every runtime started before it stops within `harken.restart_check_interval` seconds.
 - **Health.** Every runtime writes a heartbeat (connection state, leader state, outbox, counters, memory, loop lag) to the cache every `harken.health.interval` seconds. `harken:status` checks the runtimes on its own host: it fails when none runs, when a heartbeat is older than `harken.health.stale_after` seconds, or when the broker connection has been down that long. A stale heartbeat of a process that a newer one on the same host replaced is ignored. Use a cache store that every process can read (Redis, database, file on a shared disk).
-- **Logs and metrics.** Life cycle, connection, election and outbox events go to the `harken.logging.channel` log channel; credentials and payloads are never logged. Metrics go to the `Whatef\Harken\Observability\Metrics` binding (null by default).
+- **Logs.** Life cycle, connection, election and outbox events go to the `harken.logging.channel` log channel; credentials and payloads are never logged.
+- **HTTP endpoint.** With `HARKEN_HTTP=true` (or the `prometheus` metrics driver) every runtime process answers `GET /health` on `harken.http.host`:`harken.http.port` (default `0.0.0.0:9180`): 200 with its status as JSON while healthy, 503 otherwise. It suits probes that speak HTTP, such as Kubernetes; `harken:status` remains the command for a container health check.
+
+## Metrics
+
+`HARKEN_METRICS_DRIVER` picks where metrics go:
+
+| Driver | What it does |
+|---|---|
+| `null` (default) | nothing |
+| `prometheus` | every runtime process serves `GET /metrics` in the Prometheus text format on the HTTP endpoint; scrape each replica |
+| `log` | one log line every `harken.metrics.log_interval` seconds (60) with counter increases, histogram counts and averages, and gauges |
+
+Metrics are kept per process in memory. Work done outside the runtime (queue workers running `->queued()` handlers, web requests queuing publishes) is not counted here.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `harken_messages_received_total` | counter | `connection` (`main`, `leader`) |
+| `harken_messages_published_total` | counter | `connection` |
+| `harken_messages_handled_total` | counter | `route` |
+| `harken_messages_unmatched_total` | counter | |
+| `harken_notifications_handled_total` | counter | `channel` |
+| `harken_handler_seconds` | histogram | `route` or `channel` |
+| `harken_handlers_slow_total`, `harken_handlers_failed_total` | counter | `route` or `channel` |
+| `harken_connected` | gauge | `connection` |
+| `harken_reconnects_total` | counter | `connection` |
+| `harken_leader` | gauge | |
+| `harken_leader_takeovers_total` | counter | |
+| `harken_leader_takeover_seconds`, `harken_leader_gap_seconds` | histogram | |
+| `harken_outbox_published_total`, `harken_outbox_dropped_total` | counter | `stream` |
+| `harken_outbox_latency_seconds` | histogram | `stream` |
+| `harken_outbox_waiting` | gauge | `stream` |
+| `harken_memory_bytes`, `harken_loop_lag_seconds`, `harken_start_time_seconds` | gauge | |
+
+A Prometheus scrape job and alerts worth having (the broker exports Prometheus metrics too: EMQX serves them at `/api/v5/prometheus/stats` on its dashboard port, and its `emqx_delivery_dropped_queue_full` belongs on the same dashboard):
+
+```yaml
+scrape_configs:
+  - job_name: harken
+    static_configs:
+      - targets: ["harken-1:9180", "harken-2:9180"]
+```
+
+```text
+sum(harken_leader) == 0                                   # no replica receives the leader routes
+sum(harken_outbox_waiting) > 1000                         # the outbox is falling behind
+increase(harken_reconnects_total[10m]) > 5                # the broker connection is unstable
+increase(harken_handlers_failed_total[5m]) > 0            # handlers are failing
+histogram_quantile(0.99, sum by (le) (rate(harken_outbox_latency_seconds_bucket[5m]))) > 0.05
+```
 ## Planned
 
 - Per-route acknowledgement policy for QoS 1 (`ack after handler`).

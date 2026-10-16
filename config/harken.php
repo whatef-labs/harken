@@ -223,6 +223,10 @@ return [
     | Credentials are never logged. Message payloads are logged only when
     | log_payloads is enabled.
     |
+    | Metrics drivers: "null" (default), "prometheus" (served at /metrics by
+    | each runtime process, see http below) and "log" (a summary line every
+    | log_interval seconds on the logging channel).
+    |
     */
 
     'logging' => [
@@ -232,6 +236,26 @@ return [
 
     'metrics' => [
         'driver' => env('HARKEN_METRICS_DRIVER', 'null'),
+        'log_interval' => (int) env('HARKEN_METRICS_LOG_INTERVAL', 60),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | HTTP Endpoint
+    |--------------------------------------------------------------------------
+    |
+    | Each runtime process can answer GET /health (200 while healthy, 503
+    | otherwise, with its status as JSON) and, with the prometheus metrics
+    | driver, GET /metrics. It is on when enabled or when the metrics driver
+    | is prometheus. Every replica listens on its own address, so scrape or
+    | probe each one.
+    |
+    */
+
+    'http' => [
+        'enabled' => (bool) env('HARKEN_HTTP', false),
+        'host' => env('HARKEN_HTTP_HOST', '0.0.0.0'),
+        'port' => (int) env('HARKEN_HTTP_PORT', 9180),
     ],
 
 ];

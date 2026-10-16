@@ -7,6 +7,12 @@ use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Laravel\HarkenManager;
 use Whatef\Harken\Laravel\HealthStore;
 use Whatef\Harken\Laravel\RuntimeBuilder;
+use Whatef\Harken\Observability\HttpEndpoint;
+use Whatef\Harken\Observability\Metrics;
+use Whatef\Harken\Observability\MetricsLog;
+use Whatef\Harken\Observability\MetricsRegistry;
+use Whatef\Harken\Observability\NullMetrics;
+use Whatef\Harken\Observability\PrometheusFormat;
 use Whatef\Harken\Protocol\Mqtt5\Mqtt5Codec;
 use Whatef\Harken\Protocol\Packet\ConnAck;
 use Whatef\Harken\Protocol\Packet\PubAck;
@@ -186,4 +192,70 @@ it('runs leader timers once this replica leads, and broadcast timers regardless'
     $loop->advance(3.0);
 
     expect($runs)->toBe(['leader' => 3, 'broadcast' => 6]);
+});
+
+it('picks the metrics driver from the configuration', function (string $driver, string $class) {
+    config()->set('harken.metrics.driver', $driver);
+    app()->forgetInstance(Metrics::class);
+
+    expect(app(Metrics::class))->toBeInstanceOf($class);
+})->with([
+    ['null', NullMetrics::class],
+    ['prometheus', MetricsRegistry::class],
+    ['log', MetricsRegistry::class],
+]);
+
+it('rejects an unknown metrics driver', function () {
+    config()->set('harken.metrics.driver', 'statsd');
+    app()->forgetInstance(Metrics::class);
+
+    app(Metrics::class);
+})->throws(InvalidArgumentException::class, 'Unknown Harken metrics driver [statsd]');
+
+it('serves /metrics and /health with the prometheus driver, and logs metrics with the log driver', function () {
+    config()->set('harken.metrics.driver', 'prometheus');
+    config()->set('harken.http.port', 0);
+    app()->forgetInstance(Metrics::class);
+    [$runtime] = built_runtime();
+
+    $endpoints = array_values(array_filter($runtime->sources, fn ($s) => $s instanceof HttpEndpoint));
+
+    expect($endpoints)->toHaveCount(1)
+        ->and((fn () => $this->metrics)->call($endpoints[0]))->toBeInstanceOf(MetricsRegistry::class);
+
+    config()->set('harken.metrics.driver', 'log');
+    app()->forgetInstance(Metrics::class);
+    [$runtime] = built_runtime();
+
+    expect(array_map(fn ($s) => $s::class, $runtime->sources))->toBe([MetricsLog::class]);
+
+    config()->set('harken.metrics.driver', 'null');
+    config()->set('harken.http.enabled', true);
+    app()->forgetInstance(Metrics::class);
+    [$runtime] = built_runtime();
+
+    expect(array_map(fn ($s) => $s::class, $runtime->sources))->toBe([HttpEndpoint::class])
+        ->and((fn () => $this->metrics)->call($runtime->sources[0]))->toBeNull();
+});
+
+it('counts received and published messages for the metrics', function () {
+    config()->set('harken.metrics.driver', 'log'); // same registry, no listening socket
+    app()->forgetInstance(Metrics::class);
+    [$runtime, $broker, $loop] = built_runtime();
+    $runtime->start();
+    $broker->use(0)->accept();
+    $broker->grant();
+    $broker->use(1)->accept();
+    $broker->grant();
+    $broker->send(new Publish('sensors/1/temperature', 'x'), new Publish('sensors/2/temperature', 'y'));
+    $runtime->connection->publish('cmd/1', 'x');
+    $loop->advance(5.0);
+
+    $text = PrometheusFormat::render(app(MetricsRegistry::class));
+
+    expect($text)->toContain('harken_messages_received_total{connection="leader"} 2')
+        ->toContain('harken_messages_published_total{connection="main"} 1')
+        ->toContain('harken_leader 1')
+        ->toContain('harken_connected{connection="main"} 1')
+        ->toContain('# TYPE harken_start_time_seconds gauge');
 });

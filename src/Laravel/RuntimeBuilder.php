@@ -12,7 +12,10 @@ use Illuminate\Log\LogManager;
 use Psr\Log\LoggerInterface;
 use React\EventLoop\LoopInterface;
 use Whatef\Harken\Laravel\Publishing\ReportingPublisher;
+use Whatef\Harken\Observability\HttpEndpoint;
 use Whatef\Harken\Observability\Metrics;
+use Whatef\Harken\Observability\MetricsLog;
+use Whatef\Harken\Observability\MetricsRegistry;
 use Whatef\Harken\Protocol\Packet\Packet;
 use Whatef\Harken\Runtime\Connection\Connection;
 use Whatef\Harken\Runtime\Connection\ConnectionOptions;
@@ -34,6 +37,7 @@ use Whatef\Harken\Runtime\Sources\NotificationInvoker;
 use Whatef\Harken\Runtime\Sources\NotificationObserver;
 use Whatef\Harken\Runtime\Sources\NotificationRouter;
 use Whatef\Harken\Runtime\Sources\PgNotifySource;
+use Whatef\Harken\Runtime\Sources\Source;
 use Whatef\Harken\Runtime\Timers\Scheduler;
 use Whatef\Harken\Transport\Transport;
 
@@ -115,6 +119,11 @@ final class RuntimeBuilder
         $scheduler = $this->harken->scheduler();
         $leadership = $this->leadership($connectionConfig, $options, $router->only(Distribution::Leader), $notifications->only(Distribution::Leader), $scheduler->only(Distribution::Leader), $transport, $loop, $logger, $invoker, $observer, $threshold);
         $broadcast = $notifications->only(Distribution::Broadcast);
+        $sources = $broadcast->routes() === [] ? [] : [$this->source($broadcast, $loop, $logger, $invoker, $observer, $threshold)];
+        $runtime = null;
+        array_push($sources, ...$this->observability($logger, static function () use (&$runtime): ?Runtime {
+            return $runtime;
+        }));
 
         $runtime = new Runtime(
             loop: $loop,
@@ -131,7 +140,7 @@ final class RuntimeBuilder
             ),
             leadership: $leadership,
             outbox: $this->outbox($options, $logger),
-            sources: $broadcast->routes() === [] ? [] : [$this->source($broadcast, $loop, $logger, $invoker, $observer, $threshold)],
+            sources: $sources,
             stats: $stats,
         );
 
@@ -243,6 +252,50 @@ final class RuntimeBuilder
             onError: $logger->error(...),
             guard: $guard,
         );
+    }
+
+    /**
+     * The HTTP endpoint (/health, and /metrics for the prometheus driver)
+     * and the metrics log line, as configured.
+     *
+     * @param  Closure(): ?Runtime  $runtime
+     * @return list<Source>
+     */
+    private function observability(RuntimeLogger $logger, Closure $runtime): array
+    {
+        $driver = $this->config->get('harken.metrics.driver', 'null');
+        $metrics = $this->app->make(Metrics::class);
+        $registry = $metrics instanceof MetricsRegistry ? $metrics : null;
+        $sources = [];
+
+        if ($driver === 'log' && $registry !== null) {
+            $sources[] = new MetricsLog($registry, $this->logChannel(), max(1.0, $this->float('harken.metrics.log_interval', 60.0)));
+        }
+
+        if ($driver === 'prometheus' || $this->config->get('harken.http.enabled', false)) {
+            $host = $this->config->get('harken.http.host', '0.0.0.0');
+            $health = new HealthStore($this->app->make(CacheFactory::class)->store(), (int) $this->float('harken.health.stale_after', 30.0));
+
+            $sources[] = new HttpEndpoint(
+                is_string($host) && $host !== '' ? $host : '0.0.0.0',
+                (int) $this->float('harken.http.port', 9180),
+                static function () use ($runtime, $health): array {
+                    $current = $runtime();
+
+                    if ($current === null) {
+                        return [false, ['state' => 'starting']];
+                    }
+
+                    $status = $current->status();
+                    $problem = $health->problem($status);
+
+                    return [$problem === null, ['health' => $problem ?? 'ok'] + $status];
+                },
+                $driver === 'prometheus' ? $registry : null,
+            );
+        }
+
+        return $sources;
     }
 
     private function outbox(ConnectionOptions $options, RuntimeLogger $logger): ?RedisStreamsOutbox

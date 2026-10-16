@@ -36,7 +36,7 @@ final readonly class LoggingDispatchObserver implements DispatchObserver, Notifi
         $labels = ['route' => $route->pattern->pattern];
 
         $this->metrics->increment('harken_messages_handled_total', 1, $labels);
-        $this->metrics->observe('harken_handler_milliseconds', $milliseconds, $labels);
+        $this->metrics->observe('harken_handler_seconds', $milliseconds / 1000, $labels);
     }
 
     public function slow(Route $route, Message $message, float $milliseconds): void
@@ -69,7 +69,7 @@ final readonly class LoggingDispatchObserver implements DispatchObserver, Notifi
         $labels = ['channel' => $route->channel];
 
         $this->metrics->increment('harken_notifications_handled_total', 1, $labels);
-        $this->metrics->observe('harken_handler_milliseconds', $milliseconds, $labels);
+        $this->metrics->observe('harken_handler_seconds', $milliseconds / 1000, $labels);
     }
 
     public function notificationSlow(NotificationRoute $route, Notification $notification, float $milliseconds): void

@@ -39,6 +39,9 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
     /** @var array<string, int> Successful connects per connection. */
     private array $connects = [];
 
+    /** @var array<string, array{string, int, int}> Connection => [instance, received, published] at the last heartbeat. */
+    private array $counted = [];
+
     /** @var (Closure(string, string): void)|null */
     private readonly ?Closure $console;
 
@@ -93,6 +96,7 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
 
     public function started(Runtime $runtime): void
     {
+        $this->metrics->gauge('harken_start_time_seconds', round(microtime(true), 3));
         $this->logger->info('Harken runtime started.', [
             'connection' => $runtime->connection->options->name,
             'client_id' => $runtime->connection->options->clientId,
@@ -147,12 +151,46 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         $this->lastStatus = $status;
         $this->health->write($status);
 
-        $this->metrics->gauge('harken_memory_megabytes', is_numeric($status['memory_mb'] ?? null) ? (float) $status['memory_mb'] : 0.0);
-        $this->metrics->gauge('harken_loop_lag_milliseconds', is_numeric($status['loop_lag_ms'] ?? null) ? (float) $status['loop_lag_ms'] : 0.0);
+        $this->metrics->gauge('harken_memory_bytes', memory_get_usage(true));
+        $this->metrics->gauge('harken_loop_lag_seconds', is_numeric($status['loop_lag_ms'] ?? null) ? (float) $status['loop_lag_ms'] / 1000 : 0.0);
 
         foreach ($this->stats->outboxLengths as $stream => $length) {
             $this->metrics->gauge('harken_outbox_waiting', $length, ['stream' => $stream]);
         }
+
+        $mqtt = is_array($status['mqtt'] ?? null) ? $status['mqtt'] : [];
+        $this->count('main', (string) json_encode($status['started_at'] ?? null), $mqtt);
+        $leader = is_array($status['leader'] ?? null) ? $status['leader'] : [];
+
+        if (is_array($leader['mqtt'] ?? null)) {
+            // A new term opens a new leader connection, whose counters start at zero.
+            $this->count('leader', (string) json_encode($leader['terms'] ?? null), $leader['mqtt']);
+        }
+    }
+
+    /**
+     * Turns a connection's running totals into counter increments.
+     *
+     * @param  array<array-key, mixed>  $mqtt
+     */
+    private function count(string $connection, string $instance, array $mqtt): void
+    {
+        $received = is_int($mqtt['received'] ?? null) ? $mqtt['received'] : 0;
+        $published = is_int($mqtt['published'] ?? null) ? $mqtt['published'] : 0;
+        [$lastInstance, $lastReceived, $lastPublished] = $this->counted[$connection] ?? [$instance, 0, 0];
+
+        if ($lastInstance !== $instance) {
+            $lastReceived = $lastPublished = 0;
+        }
+
+        $labels = ['connection' => $connection];
+        $this->metrics->increment('harken_messages_received_total', max(0, $received - $lastReceived), $labels);
+
+        if ($connection === 'main') {
+            $this->metrics->increment('harken_messages_published_total', max(0, $published - $lastPublished), $labels);
+        }
+
+        $this->counted[$connection] = [$instance, $received, $published];
     }
 
     public function restartRequested(float $startedAt): bool
@@ -201,7 +239,7 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         $this->metrics->increment('harken_outbox_published_total', 1, ['stream' => $stream]);
 
         if ($latencyMs !== null) {
-            $this->metrics->observe('harken_outbox_latency_milliseconds', $latencyMs, ['stream' => $stream]);
+            $this->metrics->observe('harken_outbox_latency_seconds', $latencyMs / 1000, ['stream' => $stream]);
         }
     }
 
