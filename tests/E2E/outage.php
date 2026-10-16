@@ -10,7 +10,7 @@ declare(strict_types=1);
  *   php tests/E2E/outage.php network|broker [outage-seconds=30]
  *
  * One `harken:start` replica with a leader route on harken-e2e/<run>/{kind}
- * receives QoS 1 messages ("live-N") at 20 per second.
+ * receives QoS 1 messages ("live-N") at 10 per second.
  *
  * network: the replica reaches the broker through a TCP proxy in this
  *   script, which drops every connection and ends new ones at once for
@@ -47,7 +47,9 @@ require __DIR__.'/../../vendor/autoload.php';
 
 $mode = $argv[1] ?? 'network';
 $outage = (float) ($argv[2] ?? 30);
-$rate = 20; // the broker queues at most 1 000 messages per offline session by default
+// The broker queues at most 1 000 messages per offline session by default:
+// enough for the outage plus a reconnect backoff of up to a minute.
+$rate = 10;
 $host = getenv('HARKEN_TEST_BROKER_HOST') ?: '127.0.0.1';
 $container = getenv('HARKEN_TEST_BROKER_CONTAINER') ?: 'harken-dev-emqx-1';
 $proxyPort = 18830;

@@ -26,20 +26,21 @@ The throughput and latency runs (inbound, outbox, isolation) connect to the EMQX
 
 ## Broker outage
 
-`php tests/E2E/outage.php network|broker 30`: one replica with a leader route receives QoS 1 messages at 20 per second, then loses the broker for 30 s.
+`php tests/E2E/outage.php network|broker 30`: one replica with a leader route receives QoS 1 messages at 10 per second (20 in the earlier runs marked so below), then loses the broker for 30 s.
 
 - `network`: the replica reaches the broker through a TCP proxy, which drops every connection and turns new ones away for 30 s. The broker keeps running, and a retained message is published to it during the outage.
 - `broker`: the EMQX container is stopped for 30 s and started again, losing every session; a retained message is published as soon as it is back.
 
-| Outage | Machine | Retained message received after the broker is back | Lost |
-|---|---|---|---|
-| network | x86_64 VM | 14.9 s | 0 of 1 057, including those sent during the outage |
-| network | aarch64 | 19.0 s | 0 |
-| broker restart | x86_64 VM | 25.6 s | 0 from the resubscription on |
-| broker restart | aarch64 | 12.4 s | 0 from the resubscription on |
+| Outage | Machine | Rate / s | Retained message received after the broker is back | Lost |
+|---|---|---|---|---|
+| network | x86_64 VM | 10 | 19.3 s | 0 of 573, including those sent during the outage |
+| network | x86_64 VM, ext-uv | 10 | 10.2 s | 0 of 480 |
+| network | aarch64 | 20 | 19.0 s | 0 |
+| broker restart | x86_64 VM | 20 | 25.6 s | 0 from the resubscription on |
+| broker restart | aarch64 | 20 | 12.4 s | 0 from the resubscription on |
 
 - The replica kept running throughout and reconnected on its own; the time after the broker is back is the reconnect backoff (1 s doubling to 60 s, with jitter), so it varies from run to run and stays under a minute.
-- While the network is down the broker queues the QoS 1 messages in the leader's persistent session, and the replica receives all of them on reconnect (up to `mqtt.max_mqueue_len`, 1 000 by default).
+- While the network is down the broker queues the QoS 1 messages in the leader's persistent session, and the replica receives all of them on reconnect, up to `mqtt.max_mqueue_len` (1 000 by default): at 20 per second one run reconnected after 26 s and the broker dropped the 127 messages beyond that, which is why the script now sends 10 per second. Size the queue for the inbound rate times the longest outage plus the reconnect backoff.
 - A broker restart without durable sessions loses the session: messages published before the replica subscribed again had no subscriber. `harken.connections.*.reconnect.max_delay` shortens that window.
 
 ## Linux aarch64

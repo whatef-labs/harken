@@ -50,6 +50,8 @@ $env = [
     'HARKEN_LEADER_LOCK' => 'redis',
     'HARKEN_LEADER_CLIENT_ID' => "harken-soak-{$run}-leader",
     'REDIS_PREFIX' => $prefix,
+    // Its own cache, so harken:restart from another run cannot stop these replicas.
+    'CACHE_STORE' => 'redis',
     'DB_CONNECTION' => 'pgsql',
     'DB_HOST' => '127.0.0.1',
     'DB_DATABASE' => 'harken',
@@ -221,5 +223,8 @@ $cleanup = new Connection(
 );
 await($cleanup->connect());
 await($cleanup->disconnect());
+await($publisher->disconnect());
+// react/async runs the loop to completion when the script ends: stop it.
+Loop::stop();
 
 exit($pass ? 0 : 1);
