@@ -1,0 +1,13 @@
+# Boots a bare Laravel application with Harken for end-to-end runs:
+#
+#   php tests/E2E/artisan harken:start
+#
+# The broker, Redis and routes come from environment variables; see
+# E2EServiceProvider and takeover.php.
+providers:
+  - Whatef\Harken\Laravel\HarkenServiceProvider
+  - Whatef\Harken\Tests\E2E\E2EServiceProvider
+
+env:
+  - CACHE_STORE=file
+  - LOG_CHANNEL=stderr
