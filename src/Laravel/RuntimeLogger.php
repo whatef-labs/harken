@@ -285,6 +285,12 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         ]);
     }
 
+    public function expired(string $stream, OutboxMessage $message): void
+    {
+        $this->stats->outboxExpired++;
+        $this->metrics->increment('harken_outbox_expired_total', 1, ['stream' => $stream]);
+    }
+
     public function trimmed(string $stream, int $count): void
     {
         $this->stats->outboxTrimmed += $count;

@@ -42,6 +42,19 @@ describe('outbox entries', function () {
             ->and(array_key_exists('properties', (new OutboxMessage('a', 'b'))->toFields()))->toBeFalse();
     });
 
+    it('takes the time an entry waited off its message expiry, rounding up', function () {
+        $message = new OutboxMessage('cmd', '', 1, false, 1_000_000, new Properties(contentType: 'text/plain', messageExpiryInterval: 10));
+
+        expect($message->expiryLeft(1_000_000.0))->toBe(10)
+            ->and($message->expiryLeft(1_001_500.0))->toBe(9)
+            ->and($message->expiryLeft(1_009_999.0))->toBe(1)
+            ->and($message->expiryLeft(1_010_000.0))->toBe(0)
+            ->and($message->expiryLeft(990_000.0))->toBe(10) // a clock behind the publisher's
+            ->and(new OutboxMessage('cmd', '', enqueuedAtMs: 1_000_000)->expiryLeft(9e9))->toBeNull()
+            ->and(new OutboxMessage('cmd', '', enqueuedAtMs: 1_000_000, properties: new Properties(messageExpiryInterval: 0))->expiryLeft(1_000_000.0))->toBe(0)
+            ->and($message->withExpiry(9)->properties)->toEqual(new Properties(contentType: 'text/plain', messageExpiryInterval: 9));
+    });
+
     it('stamps the enqueue time when missing', function () {
         $fields = (new OutboxMessage('a', 'b'))->toFields();
 

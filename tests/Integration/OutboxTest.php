@@ -163,6 +163,11 @@ final class RecordingOutboxObserver implements OutboxObserver
         $this->events[] = 'dropped '.($message->topic ?? 'malformed');
     }
 
+    public function expired(string $stream, OutboxMessage $message): void
+    {
+        $this->events[] = "expired {$message->topic}";
+    }
+
     public function trimmed(string $stream, int $count): void
     {
         $this->events[] = "trimmed {$count}";
@@ -311,6 +316,27 @@ it('drops entries the broker refuses for good and keeps the rest pending', funct
     expect($observer->events)->toContain('dropped cmd/denied', 'dropped malformed', 'error '.ConnectionClosed::class)
         ->and(await($redis->call('xlen', $normal)))->toBe(1)
         ->and(outbox_pending($redis, $normal))->toBe(1);
+});
+
+it('removes entries whose message expiry ran out and sends the others with the time left', function () {
+    $observer = new RecordingOutboxObserver;
+    [$outbox, $redis, , $normal] = outbox(observer: $observer);
+    $now = (int) (microtime(true) * 1000);
+    outbox_add($redis, $normal, new OutboxMessage('cmd/stale', 'x', 1, false, $now - 5000, new Properties(messageExpiryInterval: 3)));
+    outbox_add($redis, $normal, new OutboxMessage('cmd/fresh', 'x', 1, false, $now - 1500, new Properties(contentType: 'text/plain', messageExpiryInterval: 10)));
+    outbox_add($redis, $normal, new OutboxMessage('cmd/lasting', 'x', 1, false, $now - 5000));
+    $publisher = new RecordingPublisher;
+
+    $outbox->start(Loop::get(), $publisher);
+    outbox_wait(fn () => count($publisher->published) === 2 && in_array('expired cmd/stale', $observer->events, true));
+    delay(0.1);
+
+    expect($publisher->topics())->toBe(['cmd/fresh', 'cmd/lasting'])
+        ->and($publisher->published[0]->properties->messageExpiryInterval)->toBe(9)
+        ->and($publisher->published[0]->properties->contentType)->toBe('text/plain')
+        ->and($publisher->published[1]->properties->messageExpiryInterval)->toBeNull()
+        ->and(await($redis->call('xlen', $normal)))->toBe(0)
+        ->and(outbox_pending($redis, $normal))->toBe(0);
 });
 
 it('takes over entries a crashed replica left pending', function () {

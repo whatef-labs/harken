@@ -26,6 +26,34 @@ final readonly class OutboxMessage
     ) {}
 
     /**
+     * Seconds left of the message expiry interval once the time since the
+     * entry was queued is taken off (as a broker does, MQTT 5 3.3.2.3.3),
+     * rounded up: null when the message does not expire, 0 once it expired.
+     */
+    public function expiryLeft(float $nowMs): ?int
+    {
+        $interval = $this->properties->messageExpiryInterval;
+
+        if ($interval === null || $this->enqueuedAtMs === null) {
+            return $interval;
+        }
+
+        $leftMs = $interval * 1000 - ($nowMs - $this->enqueuedAtMs);
+
+        return $leftMs <= 0 ? 0 : min($interval, (int) ceil($leftMs / 1000));
+    }
+
+    /**
+     * The same message with another message expiry interval.
+     */
+    public function withExpiry(int $seconds): self
+    {
+        $properties = Properties::fromArray(['message_expiry_interval' => $seconds] + $this->properties->toArray());
+
+        return new self($this->topic, $this->payload, $this->qos, $this->retain, $this->enqueuedAtMs, $properties);
+    }
+
+    /**
      * @return array<string, string>
      */
     public function toFields(): array

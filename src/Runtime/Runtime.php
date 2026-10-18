@@ -240,6 +240,7 @@ final class Runtime
                 'in_flight' => $this->outbox instanceof RedisStreamsOutbox ? $this->outbox->inFlightCount() : null,
                 'published' => $this->stats->outboxPublished,
                 'dropped' => $this->stats->outboxDropped,
+                'expired' => $this->stats->outboxExpired,
                 'trimmed' => $this->stats->outboxTrimmed,
                 'waiting' => $this->stats->outboxLengths,
             ],

@@ -24,6 +24,7 @@ use Whatef\Harken\Protocol\Packet\Publish;
 use Whatef\Harken\Protocol\ReasonCode;
 use Whatef\Harken\Runtime\Connection\ConnectionRefused;
 use Whatef\Harken\Runtime\Leadership\LeadershipState;
+use Whatef\Harken\Runtime\Outbox\OutboxMessage;
 use Whatef\Harken\Runtime\Outbox\RedisStreamsOutbox;
 use Whatef\Harken\Runtime\Runtime;
 use Whatef\Harken\Runtime\RuntimeState;
@@ -369,15 +370,18 @@ it('starts every series at zero so Prometheus sees the first event', function ()
         ->toContain('harken_leader 0');
 });
 
-it('counts outbox entries trimmed by max_length in the status and the metrics', function () {
+it('counts outbox entries that expired or were trimmed by max_length in the status and the metrics', function () {
     config()->set('harken.metrics.driver', 'log');
     config()->set('harken.outbox.enabled', true);
     app()->forgetInstance(Metrics::class);
     [$runtime] = built_runtime();
     $observer = (fn () => $this->observer)->call($runtime->outbox);
 
+    $observer->expired('harken:outbox:normal', new OutboxMessage('cmd/late', ''));
     $observer->trimmed('harken:outbox:normal', 7);
 
-    expect($runtime->status()['outbox']['trimmed'])->toBe(7)
-        ->and(PrometheusFormat::render(app(MetricsRegistry::class)))->toContain('harken_outbox_trimmed_total{stream="harken:outbox:normal"} 7');
+    expect($runtime->status()['outbox'])->toMatchArray(['expired' => 1, 'trimmed' => 7])
+        ->and(PrometheusFormat::render(app(MetricsRegistry::class)))
+        ->toContain('harken_outbox_expired_total{stream="harken:outbox:normal"} 1')
+        ->toContain('harken_outbox_trimmed_total{stream="harken:outbox:normal"} 7');
 });

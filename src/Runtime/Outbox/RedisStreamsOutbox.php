@@ -34,6 +34,11 @@ use function React\Promise\resolve;
  * Entries of the first stream (when there are several) are published as
  * urgent, ahead of the others still waiting on the connection.
  *
+ * The time an entry waited counts against its MQTT 5 message expiry
+ * interval, as it would on a broker: an entry whose interval ran out is
+ * removed without being published, and the others go out with the time
+ * left.
+ *
  * At most $batchSize entries are in flight at once, and $maxRate (messages
  * per second) can pace publishing, so a large backlog does not flood the
  * broker. The blocking read has a Redis connection of its own, so it never
@@ -375,10 +380,22 @@ final class RedisStreamsOutbox implements Outbox
 
         $this->inFlight[$key] = true;
         $urgent = count($this->streams) > 1 && $stream === $this->streams[0];
-        $this->paced(fn (): PromiseInterface => $this->send($message, $urgent))->then(
-            function () use ($stream, $id, $key, $message): void {
+
+        // An entry that expired already does not wait for a rate limit slot.
+        $sent = $message->expiryLeft(microtime(true) * 1000) === 0
+            ? resolve(false)
+            : $this->paced(fn (): PromiseInterface => $this->send($message, $urgent));
+
+        $sent->then(
+            function (bool $sent) use ($stream, $id, $key, $message): void {
                 $this->acknowledge($stream, $id);
-                $this->observer?->published($stream, $message, $message->enqueuedAtMs === null ? null : microtime(true) * 1000 - $message->enqueuedAtMs);
+
+                if ($sent) {
+                    $this->observer?->published($stream, $message, $message->enqueuedAtMs === null ? null : microtime(true) * 1000 - $message->enqueuedAtMs);
+                } else {
+                    $this->observer?->expired($stream, $message);
+                }
+
                 $this->settled($key);
             },
             function (Throwable $e) use ($stream, $id, $key, $message): void {
@@ -396,7 +413,10 @@ final class RedisStreamsOutbox implements Outbox
     }
 
     /**
-     * @return PromiseInterface<mixed>
+     * Publishes the message with what is left of its expiry interval, or
+     * resolves false without publishing it once that ran out.
+     *
+     * @return PromiseInterface<bool>
      */
     private function send(OutboxMessage $message, bool $urgent): PromiseInterface
     {
@@ -404,15 +424,26 @@ final class RedisStreamsOutbox implements Outbox
             throw new RuntimeException('The outbox is not started.');
         }
 
-        return $this->publisher->publish($message->topic, $message->payload, $message->qos, $message->retain, $message->properties, $urgent);
+        $left = $message->expiryLeft(microtime(true) * 1000);
+
+        if ($left === 0) {
+            return resolve(false);
+        }
+
+        if ($left !== null && $left !== $message->properties->messageExpiryInterval) {
+            $message = $message->withExpiry($left);
+        }
+
+        return $this->publisher->publish($message->topic, $message->payload, $message->qos, $message->retain, $message->properties, $urgent)
+            ->then(static fn (): bool => true);
     }
 
     /**
      * Runs $send now, or later when a rate limit is set and the next slot
      * is still ahead.
      *
-     * @param  callable(): PromiseInterface<mixed>  $send
-     * @return PromiseInterface<mixed>
+     * @param  callable(): PromiseInterface<bool>  $send
+     * @return PromiseInterface<bool>
      */
     private function paced(callable $send): PromiseInterface
     {

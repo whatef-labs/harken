@@ -23,6 +23,12 @@ interface OutboxObserver
     public function dropped(string $stream, string $id, ?OutboxMessage $message, Throwable $reason): void;
 
     /**
+     * The message expiry interval ran out while the entry waited, so it was
+     * removed without being published.
+     */
+    public function expired(string $stream, OutboxMessage $message): void;
+
+    /**
      * The application trimmed the $count oldest entries of the stream to
      * keep it under outbox.max_length.
      */
