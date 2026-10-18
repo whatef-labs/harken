@@ -44,8 +44,24 @@ final class E2EServiceProvider extends ServiceProvider
         View::prependNamespace('pulse', __DIR__.'/pulse');
 
         if (getenv('E2E_MODE') === 'load') {
-            // load.php: light reports inline; slow reports inline or queued (E2E_SLOW).
-            Harken::topic('load/{id}/up', DeviceReport::class)->qos(1);
+            // load.php and bench.php: light reports, on the leader (or shared
+            // with E2E_DISTRIBUTION=shared), inline (or queued with
+            // E2E_QUEUED), resolved per message (or once with E2E_SINGLETON),
+            // QoS 1 (or 0 with E2E_QOS=0). Slow reports inline or queued (E2E_SLOW).
+            $report = Harken::topic('load/{id}/up', DeviceReport::class)->qos(getenv('E2E_QOS') === '0' ? 0 : 1);
+
+            if (getenv('E2E_DISTRIBUTION') === 'shared') {
+                $report->shared('bench');
+            }
+
+            if (getenv('E2E_QUEUED')) {
+                $report->queued();
+            }
+
+            if (getenv('E2E_SINGLETON')) {
+                $this->app->singleton(DeviceReport::class);
+            }
+
             $slow = Harken::topic('load/{id}/slow', SlowReport::class)->qos(1);
 
             if (getenv('E2E_SLOW') === 'queued') {
