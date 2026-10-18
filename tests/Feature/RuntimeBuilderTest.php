@@ -117,7 +117,12 @@ it('builds the outbox on the configured Redis connection with its key prefix', f
 
     expect($runtime->outbox)->toBeInstanceOf(RedisStreamsOutbox::class)
         ->and($runtime->outbox->streams)->toBe(['app_harken:outbox:urgent', 'app_harken:outbox:normal'])
-        ->and($runtime->outbox->consumer)->toBe($runtime->connection->options->clientId);
+        ->and($runtime->outbox->consumer)->toBe($runtime->connection->options->clientId)
+        ->and($runtime->outbox->pruneIdleMs)->toBe(3_600_000);
+
+    config()->set('harken.outbox.prune_idle_consumers_ms', 0);
+
+    expect(built_runtime()[0]->outbox->pruneIdleMs)->toBeNull();
 });
 
 it('writes its heartbeat for harken:status, which fails once it goes stale', function () {

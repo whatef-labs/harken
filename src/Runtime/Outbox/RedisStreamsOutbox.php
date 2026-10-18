@@ -86,6 +86,7 @@ final class RedisStreamsOutbox implements Outbox
         public readonly int $claimIdleMs = 30000,
         public readonly ?float $maxRate = null,
         private readonly ?OutboxObserver $observer = null,
+        public readonly ?int $pruneIdleMs = null,
     ) {
         if ($streams === [] || $batchSize < 1 || $blockMs < 1 || $claimIdleMs < 1) {
             throw new InvalidArgumentException('The outbox needs at least one stream and positive batch, block and claim settings.');
@@ -93,6 +94,10 @@ final class RedisStreamsOutbox implements Outbox
 
         if ($maxRate !== null && $maxRate <= 0) {
             throw new InvalidArgumentException('The outbox rate limit must be greater than zero, or null.');
+        }
+
+        if ($pruneIdleMs !== null && $pruneIdleMs <= $blockMs) {
+            throw new InvalidArgumentException('Idle consumers can only be removed after more than the blocking read time, or never (null).');
         }
     }
 
@@ -110,10 +115,14 @@ final class RedisStreamsOutbox implements Outbox
 
         $this->createGroups()->then(function (): void {
             $this->claim();
+            $this->prune();
             $this->read();
         });
 
-        $this->claimTimer = $loop->addPeriodicTimer($this->claimIdleMs / 1000, $this->claim(...));
+        $this->claimTimer = $loop->addPeriodicTimer($this->claimIdleMs / 1000, function (): void {
+            $this->claim();
+            $this->prune();
+        });
     }
 
     /**
@@ -299,6 +308,51 @@ final class RedisStreamsOutbox implements Outbox
             $this->retryTimer = null;
             $this->read();
         });
+    }
+
+    /**
+     * Removes the consumers that have nothing pending and have not read for
+     * $pruneIdleMs: replicas that stopped. Every runtime process reads under
+     * a name of its own, so without this a name is left behind by each
+     * restart. A consumer with pending entries stays until claim() took
+     * them over.
+     */
+    private function prune(): void
+    {
+        $acker = $this->acker;
+
+        if (! $this->running || $acker === null || $this->pruneIdleMs === null) {
+            return;
+        }
+
+        foreach ($this->streams as $stream) {
+            $acker->call('xinfo', 'CONSUMERS', $stream, $this->group)->then(
+                function (mixed $consumers) use ($acker, $stream): void {
+                    foreach (is_array($consumers) ? $consumers : [] as $flat) {
+                        $info = [];
+
+                        for ($i = 0; is_array($flat) && $i + 1 < count($flat); $i += 2) {
+                            $info[(string) $flat[$i]] = $flat[$i + 1];
+                        }
+
+                        $name = $info['name'] ?? null;
+
+                        if (! is_string($name) || $name === $this->consumer || ($info['pending'] ?? null) !== 0
+                            || ! is_int($info['idle'] ?? null) || $info['idle'] < $this->pruneIdleMs) {
+                            continue;
+                        }
+
+                        $acker->call('xgroup', 'DELCONSUMER', $stream, $this->group, $name)->then(
+                            fn () => $this->observer?->pruned($stream, $name),
+                            static function (): void {},
+                        );
+                    }
+                },
+                static function (): void {
+                    // Redis being unreachable is reported by the reading loop.
+                },
+            );
+        }
     }
 
     /**

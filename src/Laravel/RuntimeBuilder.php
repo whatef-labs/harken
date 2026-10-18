@@ -406,6 +406,7 @@ final class RuntimeBuilder
 
         $group = $this->config->get('harken.outbox.group', 'harken');
         $maxRate = $this->config->get('harken.outbox.max_rate');
+        $prune = $this->config->get('harken.outbox.prune_idle_consumers_ms', 3_600_000);
 
         return new RedisStreamsOutbox(
             endpoint: $endpoint,
@@ -417,6 +418,7 @@ final class RuntimeBuilder
             claimIdleMs: (int) $this->float('harken.outbox.claim_idle_ms', 30000.0),
             maxRate: is_numeric($maxRate) && (float) $maxRate > 0 ? (float) $maxRate : null,
             observer: $logger,
+            pruneIdleMs: is_numeric($prune) && (int) $prune > 0 ? (int) $prune : null,
         );
     }
 

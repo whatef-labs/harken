@@ -157,6 +157,11 @@ return [
     | them in harken_outbox_trimmed_total. Redis trims whole nodes, so a
     | stream can hold somewhat more entries than max_length.
     |
+    | Each runtime process reads under a consumer name of its own, so every
+    | restart leaves a name behind in the group. Consumers with nothing
+    | pending that have not read for prune_idle_consumers_ms are removed
+    | (empty or 0 keeps them all).
+    |
     */
 
     'outbox' => [
@@ -172,6 +177,7 @@ return [
         'claim_idle_ms' => 30000,
         'max_rate' => env('HARKEN_OUTBOX_MAX_RATE'),
         'max_length' => env('HARKEN_OUTBOX_MAX_LENGTH'),
+        'prune_idle_consumers_ms' => 3600000,
     ],
 
     /*

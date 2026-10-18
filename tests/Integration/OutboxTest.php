@@ -173,6 +173,11 @@ final class RecordingOutboxObserver implements OutboxObserver
         $this->events[] = "trimmed {$count}";
     }
 
+    public function pruned(string $stream, string $consumer): void
+    {
+        $this->events[] = "pruned {$consumer}";
+    }
+
     public function error(Throwable $error): void
     {
         $this->events[] = 'error '.$error::class;
@@ -182,13 +187,13 @@ final class RecordingOutboxObserver implements OutboxObserver
 /**
  * @return array{RedisStreamsOutbox, RedisClient, string, string} Outbox, a client to inspect Redis, urgent and normal keys.
  */
-function outbox(string $consumer = 'c1', int $batch = 100, int $claimIdleMs = 30000, ?OutboxObserver $observer = null, ?array $streams = null): array
+function outbox(string $consumer = 'c1', int $batch = 100, int $claimIdleMs = 30000, ?OutboxObserver $observer = null, ?array $streams = null, ?int $pruneIdleMs = null): array
 {
     static $run = null;
     $run ??= bin2hex(random_bytes(4));
     $endpoint = new RedisEndpoint((string) getenv('HARKEN_TEST_REDIS_HOST'), (int) (getenv('HARKEN_TEST_REDIS_PORT') ?: 6379));
     $streams ??= ["harken-it:{$run}:".test()->name().':urgent', "harken-it:{$run}:".test()->name().':normal'];
-    $outbox = new RedisStreamsOutbox($endpoint, $streams, 'harken', $consumer, 200, $batch, $claimIdleMs, null, $observer);
+    $outbox = new RedisStreamsOutbox($endpoint, $streams, 'harken', $consumer, 200, $batch, $claimIdleMs, null, $observer, $pruneIdleMs);
     outbox_opened($outbox);
 
     $redis = new RedisClient($endpoint, Loop::get());
@@ -358,6 +363,29 @@ it('takes over entries a crashed replica left pending', function () {
 
     expect($publisher->topics())->toBe(['cmd/stranded'])
         ->and(outbox_pending($redis, $normal))->toBe(0);
+});
+
+it('removes consumers that stopped reading with nothing pending, and keeps those with pending entries', function () {
+    $observer = new RecordingOutboxObserver;
+    [$outbox, $redis, $urgent, $normal] = outbox(observer: $observer, pruneIdleMs: 300);
+    outbox_add($redis, $normal, new OutboxMessage('cmd/stuck', 'x', 1));
+
+    foreach ([$urgent, $normal] as $stream) {
+        await($redis->call('xgroup', 'CREATE', $stream, 'harken', '0', 'MKSTREAM'));
+        await($redis->call('xgroup', 'CREATECONSUMER', $stream, 'harken', 'gone'));
+    }
+
+    await($redis->call('xreadgroup', 'GROUP', 'harken', 'stuck', 'COUNT', 1, 'STREAMS', $normal, '>')); // never acknowledged
+    delay(0.4);
+
+    $outbox->start(Loop::get(), new RecordingPublisher);
+    outbox_wait(fn () => count(array_filter($observer->events, fn (string $e): bool => $e === 'pruned gone')) === 2);
+    delay(0.1);
+    $names = fn (string $stream): array => array_map(fn (array $c): string => $c[1], await($redis->call('xinfo', 'CONSUMERS', $stream, 'harken')));
+
+    expect($names($normal))->toBe(['c1', 'stuck'])
+        ->and($names($urgent))->toBe(['c1'])
+        ->and(outbox_pending($redis, $normal))->toBe(1);
 });
 
 it('lets entries in flight finish when it stops', function () {

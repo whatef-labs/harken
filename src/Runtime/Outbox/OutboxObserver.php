@@ -35,6 +35,12 @@ interface OutboxObserver
     public function trimmed(string $stream, int $count): void;
 
     /**
+     * A consumer that had nothing pending and stopped reading long ago (a
+     * replica that stopped) was removed from the stream's group.
+     */
+    public function pruned(string $stream, string $consumer): void;
+
+    /**
      * A problem the outbox recovers from (Redis unreachable, connection to
      * the broker closed). Affected entries stay pending and are retried.
      */
