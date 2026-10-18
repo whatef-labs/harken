@@ -51,7 +51,7 @@ afterEach(function () {
 
     foreach (outbox_opened() as $outbox) {
         $redis = new RedisClient($outbox->endpoint, Loop::get());
-        await($redis->call('del', ...$outbox->streams));
+        await($redis->call('del', ...$outbox->streams, ...array_map(RedisStreamsOutbox::trimmedKey(...), $outbox->streams)));
         $redis->close();
     }
 
@@ -161,6 +161,11 @@ final class RecordingOutboxObserver implements OutboxObserver
     public function dropped(string $stream, string $id, ?OutboxMessage $message, Throwable $reason): void
     {
         $this->events[] = 'dropped '.($message->topic ?? 'malformed');
+    }
+
+    public function trimmed(string $stream, int $count): void
+    {
+        $this->events[] = "trimmed {$count}";
     }
 
     public function error(Throwable $error): void
@@ -370,6 +375,45 @@ it('queues publishes made outside the runtime in the application Redis, with its
         ->and($publisher->published[0]->properties->contentType)->toBe('text/plain');
 
     Redis::connection()->executeRaw(['DEL', "app_it_{$stream}", "app_it_{$stream}:urgent"]);
+});
+
+it('trims the oldest entries beyond max_length and reports the count once', function () {
+    config()->set('database.redis.default.host', getenv('HARKEN_TEST_REDIS_HOST'));
+    config()->set('database.redis.default.port', getenv('HARKEN_TEST_REDIS_PORT') ?: 6379);
+    config()->set('database.redis.options.prefix', 'app_it_');
+    config()->set('harken.outbox.streams.normal', $stream = 'harken-it:'.bin2hex(random_bytes(4)).':capped');
+    config()->set('harken.outbox.streams.urgent', "{$stream}:urgent");
+    config()->set('harken.outbox.max_length', 10);
+
+    for ($i = 0; $i < 300; $i++) {
+        Harken::publish("cmd/{$i}", 'x');
+    }
+
+    $streams = ["app_it_{$stream}:urgent", "app_it_{$stream}"];
+    $observer = new RecordingOutboxObserver;
+    [$first, $redis] = outbox(observer: $observer, streams: $streams);
+    [$second] = outbox(consumer: 'c2', observer: $observer, streams: $streams);
+    $kept = await($redis->call('xlen', $streams[1]));
+
+    expect($kept)->toBeGreaterThanOrEqual(10)->toBeLessThan(300)
+        ->and((int) await($redis->call('get', RedisStreamsOutbox::trimmedKey($streams[1]))))->toBe(300 - $kept);
+
+    $publisher = new RecordingPublisher;
+    $first->start(Loop::get(), $publisher);
+    $second->start(Loop::get(), $publisher);
+    outbox_wait(fn () => count($publisher->published) === $kept);
+    $first->collectTrimmed();
+    $second->collectTrimmed();
+    $trims = fn (): array => array_values(array_filter($observer->events, fn (string $e): bool => str_starts_with($e, 'trimmed')));
+    outbox_wait(fn () => $trims() !== []);
+    delay(0.1);
+
+    $topics = $publisher->topics();
+    sort($topics, SORT_NATURAL);
+
+    expect($trims())->toBe(['trimmed '.(300 - $kept)])
+        ->and($topics)->toBe(array_map(fn (int $i): string => "cmd/{$i}", range(300 - $kept, 299)))
+        ->and(await($redis->call('exists', RedisStreamsOutbox::trimmedKey($streams[1]))))->toBe(0);
 });
 
 it('throws when the outbox cannot store a publish', function () {

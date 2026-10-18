@@ -23,6 +23,12 @@ interface OutboxObserver
     public function dropped(string $stream, string $id, ?OutboxMessage $message, Throwable $reason): void;
 
     /**
+     * The application trimmed the $count oldest entries of the stream to
+     * keep it under outbox.max_length.
+     */
+    public function trimmed(string $stream, int $count): void;
+
+    /**
      * A problem the outbox recovers from (Redis unreachable, connection to
      * the broker closed). Affected entries stay pending and are retried.
      */

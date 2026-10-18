@@ -50,6 +50,7 @@ final class HarkenServiceProvider extends ServiceProvider
             $redis = $config->get('harken.outbox.redis', 'default');
             $stream = $config->get('harken.outbox.streams.normal', 'harken:outbox:normal');
             $urgent = $config->get('harken.outbox.streams.urgent', 'harken:outbox:urgent');
+            $maxLength = $config->get('harken.outbox.max_length');
 
             return new HarkenManager(
                 new Router,
@@ -60,6 +61,7 @@ final class HarkenServiceProvider extends ServiceProvider
                     is_string($redis) ? $redis : 'default',
                     is_string($stream) ? $stream : 'harken:outbox:normal',
                     is_string($urgent) ? $urgent : 'harken:outbox:urgent',
+                    is_numeric($maxLength) && (int) $maxLength > 0 ? (int) $maxLength : null,
                 ),
                 is_string($routes) ? $routes : null,
             );

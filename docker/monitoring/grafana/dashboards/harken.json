@@ -845,7 +845,7 @@
             "type": "timeseries",
             "id": 16,
             "title": "Published and dropped / s",
-            "description": "Entries published (and acknowledged by the broker) or dropped (malformed or refused for good).",
+            "description": "Entries published (and acknowledged by the broker), dropped (malformed or refused for good) or trimmed unpublished by outbox.max_length.",
             "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -876,6 +876,17 @@
                     },
                     "expr": "sum by (stream) (rate(harken_outbox_dropped_total{instance=~\"$instance\"}[$__rate_interval]))",
                     "legendFormat": "dropped {{stream}}",
+                    "range": true,
+                    "instant": false
+                },
+                {
+                    "refId": "C",
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "${datasource}"
+                    },
+                    "expr": "sum by (stream) (rate(harken_outbox_trimmed_total{instance=~\"$instance\"}[$__rate_interval]))",
+                    "legendFormat": "trimmed {{stream}}",
                     "range": true,
                     "instant": false
                 }

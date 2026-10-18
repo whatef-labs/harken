@@ -149,6 +149,41 @@ final class RedisStreamsOutbox implements Outbox
     }
 
     /**
+     * The counter of entries the application trimmed from $stream to keep
+     * it under outbox.max_length.
+     */
+    public static function trimmedKey(string $stream): string
+    {
+        return "{$stream}:trimmed";
+    }
+
+    /**
+     * Takes the counts of entries trimmed since the last call and reports
+     * them to the observer. GETDEL hands each count to one replica only.
+     */
+    public function collectTrimmed(): void
+    {
+        $acker = $this->acker;
+
+        if ($acker === null) {
+            return;
+        }
+
+        foreach ($this->streams as $stream) {
+            $acker->call('getdel', self::trimmedKey($stream))->then(
+                function (mixed $count) use ($stream): void {
+                    if (is_numeric($count) && (int) $count > 0) {
+                        $this->observer?->trimmed($stream, (int) $count);
+                    }
+                },
+                static function (): void {
+                    // Redis being unreachable is reported by the reading loop.
+                },
+            );
+        }
+    }
+
+    /**
      * Entries waiting in each stream (XLEN), for status and metrics.
      *
      * @return PromiseInterface<array<string, int>>

@@ -13,6 +13,7 @@ use Throwable;
 use Whatef\Harken\Laravel\StoreConfig;
 use Whatef\Harken\Protocol\Properties;
 use Whatef\Harken\Runtime\Outbox\OutboxMessage;
+use Whatef\Harken\Runtime\Outbox\RedisStreamsOutbox;
 use Whatef\Harken\Runtime\Publisher;
 
 use function React\Promise\resolve;
@@ -26,12 +27,27 @@ use function React\Promise\resolve;
  * the stream entry id once Redis has stored the entry, and throws
  * OutboxUnavailable when it could not, so a failure is never silent in
  * code that ignores the promise.
+ *
+ * With $maxLength set, the same step trims the stream to about that many
+ * entries, dropping the oldest, and adds the number trimmed to a counter
+ * that a runtime reports.
  */
 final readonly class StreamsDelegatePublisher implements Publisher
 {
+    /** XADD, then XTRIM in the same atomic step, counting what was trimmed. */
+    private const string ADD_AND_TRIM = <<<'LUA'
+        local id = redis.call('XADD', KEYS[1], '*', unpack(ARGV, 2))
+        local trimmed = redis.call('XTRIM', KEYS[1], 'MAXLEN', '~', ARGV[1])
+        if trimmed > 0 then
+            redis.call('INCRBY', KEYS[2], trimmed)
+        end
+        return id
+        LUA;
+
     /**
      * @param  string  $stream  Stream key without the Redis key prefix.
      * @param  string  $urgentStream  Stream for urgent messages, served first by the runtime.
+     * @param  int|null  $maxLength  Entries each stream keeps at most (about: Redis trims whole nodes), or null for no limit.
      */
     public function __construct(
         private RedisFactory $redis,
@@ -39,6 +55,7 @@ final readonly class StreamsDelegatePublisher implements Publisher
         public string $redisConnection,
         public string $stream,
         public string $urgentStream,
+        public ?int $maxLength = null,
     ) {}
 
     /**
@@ -51,8 +68,10 @@ final readonly class StreamsDelegatePublisher implements Publisher
         try {
             // Raw commands skip the client's own key prefix; add the same
             // prefix the runtime reads with.
-            $stream = $urgent ? $this->urgentStream : $this->stream;
-            $command = ['XADD', $this->stores->redis($this->redisConnection)->prefix.$stream, '*'];
+            $stream = $this->stores->redis($this->redisConnection)->prefix.($urgent ? $this->urgentStream : $this->stream);
+            $command = $this->maxLength === null
+                ? ['XADD', $stream, '*']
+                : ['EVAL', self::ADD_AND_TRIM, '2', $stream, RedisStreamsOutbox::trimmedKey($stream), (string) $this->maxLength];
 
             foreach ($message->toFields() as $field => $value) {
                 $command[] = $field;

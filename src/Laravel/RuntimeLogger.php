@@ -285,6 +285,13 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         ]);
     }
 
+    public function trimmed(string $stream, int $count): void
+    {
+        $this->stats->outboxTrimmed += $count;
+        $this->metrics->increment('harken_outbox_trimmed_total', $count, ['stream' => $stream]);
+        $this->logger->warning("Harken outbox stream {$stream} reached max_length: its {$count} oldest entries were trimmed.", ['stream' => $stream]);
+    }
+
     private function console(string $level, string $line): void
     {
         if ($this->console !== null) {

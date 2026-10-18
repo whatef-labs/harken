@@ -311,6 +311,7 @@ final class RuntimeBuilder
             foreach ($runtime->outbox->streams as $stream) {
                 $metrics->increment('harken_outbox_published_total', 0, ['stream' => $stream]);
                 $metrics->increment('harken_outbox_dropped_total', 0, ['stream' => $stream]);
+                $metrics->increment('harken_outbox_trimmed_total', 0, ['stream' => $stream]);
                 $metrics->declareHistogram('harken_outbox_latency_seconds', ['stream' => $stream]);
             }
         }

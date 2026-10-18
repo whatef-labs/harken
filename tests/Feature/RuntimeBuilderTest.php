@@ -364,6 +364,20 @@ it('starts every series at zero so Prometheus sees the first event', function ()
         ->toContain('harken_handlers_failed_total{route="sensors/{id}/broken"} 0')
         ->toContain('harken_reconnects_total{connection="leader"} 0')
         ->toMatch('/harken_outbox_dropped_total{stream="[^"]*harken:outbox:urgent"} 0/')
+        ->toMatch('/harken_outbox_trimmed_total{stream="[^"]*harken:outbox:normal"} 0/')
         ->toContain('harken_leader_gap_seconds_bucket{le="+Inf"} 0')
         ->toContain('harken_leader 0');
+});
+
+it('counts outbox entries trimmed by max_length in the status and the metrics', function () {
+    config()->set('harken.metrics.driver', 'log');
+    config()->set('harken.outbox.enabled', true);
+    app()->forgetInstance(Metrics::class);
+    [$runtime] = built_runtime();
+    $observer = (fn () => $this->observer)->call($runtime->outbox);
+
+    $observer->trimmed('harken:outbox:normal', 7);
+
+    expect($runtime->status()['outbox']['trimmed'])->toBe(7)
+        ->and(PrometheusFormat::render(app(MetricsRegistry::class)))->toContain('harken_outbox_trimmed_total{stream="harken:outbox:normal"} 7');
 });

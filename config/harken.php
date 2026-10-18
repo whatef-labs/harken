@@ -151,6 +151,12 @@ return [
     | does not overflow subscribers' session queues on the broker. Entries
     | left pending by a replica that died are taken over after claim_idle_ms.
     |
+    | max_length (entries per stream, empty for no limit) keeps a stream that
+    | no runtime consumes for a long time from filling Redis: publishing
+    | then trims the oldest entries, which are lost, and a runtime counts
+    | them in harken_outbox_trimmed_total. Redis trims whole nodes, so a
+    | stream can hold somewhat more entries than max_length.
+    |
     */
 
     'outbox' => [
@@ -165,6 +171,7 @@ return [
         'batch' => 100,
         'claim_idle_ms' => 30000,
         'max_rate' => env('HARKEN_OUTBOX_MAX_RATE'),
+        'max_length' => env('HARKEN_OUTBOX_MAX_LENGTH'),
     ],
 
     /*

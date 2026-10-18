@@ -177,6 +177,7 @@ final class SweepPending
 - **Outside the runtime** (HTTP requests, queued jobs, `->queued()` handlers): the message is appended to a Redis stream (`harken.outbox.redis`, with the connection's key prefix) and a running runtime publishes it. The call is synchronous: it returns an already resolved promise holding the stream entry id once `XADD` succeeded, and throws `Whatef\Harken\Laravel\Publishing\OutboxUnavailable` when Redis could not store it, so a failure cannot go unnoticed in code that ignores the promise. It does not wait for the broker.
 - Every runtime replica consumes the outbox as one consumer group, so each message is published by one replica. An entry is removed only after the broker acknowledged it (PUBACK for QoS 1), so delivery is at least once; entries a crashed replica left pending are taken over after `claim_idle_ms`. A message the broker refuses for good (MQTT 5 reason code such as 0x87 not authorized) is dropped and reported rather than retried forever. `harken.outbox.max_rate` paces a large backlog.
 - **Urgent messages.** `Harken::urgent()->publish('cmd/door/1', $payload, qos: 1)` goes to the urgent outbox stream, which every runtime drains before the normal one, so a command is not stuck behind a bulk backlog. Inside the runtime it goes to the front of the connection's queue of messages waiting for the broker's Receive Maximum.
+- **Length limit.** Without a runtime consuming it, the outbox grows until Redis is full, and on a `noeviction` instance shared with sessions and queues that stops their writes as well. `harken.outbox.max_length` (`HARKEN_OUTBOX_MAX_LENGTH`, empty for no limit) caps each stream: the publish trims the stream in the same atomic step (`XTRIM MAXLEN ~`), so the **oldest entries, which have not been published, are lost**. Redis trims whole nodes, so a stream can hold somewhat more than the limit. A runtime counts the trimmed entries in `harken_outbox_trimmed_total` and the status, and logs a warning; entries trimmed while no runtime ran are reported once one starts. An entry trimmed while a runtime was already publishing it still goes out, so the count is an upper bound.
 
 ## Testing
 
@@ -265,7 +266,7 @@ Metrics are kept per process in memory. Work done outside the runtime (queue wor
 | `harken_leader_takeovers_total` | counter | |
 | `harken_leader_takeover_seconds`, `harken_leader_gap_seconds` | histogram | |
 | `harken_leader_last_takeover_seconds`, `harken_leader_last_gap_seconds` | gauge | |
-| `harken_outbox_published_total`, `harken_outbox_dropped_total` | counter | `stream` |
+| `harken_outbox_published_total`, `harken_outbox_dropped_total`, `harken_outbox_trimmed_total` | counter | `stream` |
 | `harken_outbox_latency_seconds` | histogram | `stream` |
 | `harken_outbox_waiting` | gauge | `stream` |
 | `harken_memory_bytes`, `harken_loop_lag_seconds`, `harken_start_time_seconds` | gauge | |

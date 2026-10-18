@@ -20,6 +20,8 @@ final class RuntimeStats
 
     public int $outboxDropped = 0;
 
+    public int $outboxTrimmed = 0;
+
     /** @var array<string, int> Stream => entries waiting, from the last check. */
     public array $outboxLengths = [];
 

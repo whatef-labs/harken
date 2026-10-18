@@ -240,6 +240,7 @@ final class Runtime
                 'in_flight' => $this->outbox instanceof RedisStreamsOutbox ? $this->outbox->inFlightCount() : null,
                 'published' => $this->stats->outboxPublished,
                 'dropped' => $this->stats->outboxDropped,
+                'trimmed' => $this->stats->outboxTrimmed,
                 'waiting' => $this->stats->outboxLengths,
             ],
             'handlers' => [
@@ -310,6 +311,7 @@ final class Runtime
             }, static function (): void {
                 // Reported by the outbox observer.
             });
+            $this->outbox->collectTrimmed();
         }
 
         try {
