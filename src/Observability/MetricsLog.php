@@ -11,9 +11,9 @@ use Whatef\Harken\Runtime\Sources\Source;
 
 /**
  * The `log` metrics driver: one log line every interval with what changed
- * since the previous line (counters as deltas, histograms as count and
- * average) and the current gauges. Enough to follow a runtime without a
- * metrics system.
+ * since the previous line (counters as deltas; histograms as count,
+ * average, p50 and p99 estimated from the buckets, and maximum) and the
+ * current gauges. Enough to follow a runtime without a metrics system.
  */
 final class MetricsLog implements Source
 {
@@ -24,7 +24,7 @@ final class MetricsLog implements Source
     /** @var array<string, float> */
     private array $lastCounters = [];
 
-    /** @var array<string, array{float, int}> */
+    /** @var array<string, array{float, int, list<int>}> Sum, count and buckets at the previous line. */
     private array $lastHistograms = [];
 
     public function __construct(
@@ -83,19 +83,56 @@ final class MetricsLog implements Source
         }
 
         foreach ($this->metrics->histograms() as $name => $series) {
+            $bounds = MetricsRegistry::buckets($name);
+
             foreach ($series as [$labels, $histogram]) {
                 $key = self::key($name, $labels);
-                [$lastSum, $lastCount] = $this->lastHistograms[$key] ?? [0.0, 0];
+                [$lastSum, $lastCount, $lastBuckets] = $this->lastHistograms[$key] ?? [0.0, 0, array_fill(0, count($bounds), 0)];
                 $count = $histogram['count'] - $lastCount;
+                $buckets = array_map(static fn (int $now, int $before): int => $now - $before, $histogram['buckets'], $lastBuckets);
                 $summary["{$key}.count"] = $count;
-                $summary["{$key}.avg"] = $count === 0 ? 0.0 : round(($histogram['sum'] - $lastSum) / $count, 3);
-                $this->lastHistograms[$key] = [$histogram['sum'], $histogram['count']];
+                $summary["{$key}.avg"] = $count === 0 ? 0.0 : round(($histogram['sum'] - $lastSum) / $count, 6);
+                $summary["{$key}.p50"] = self::quantile(0.5, $bounds, $buckets, $count, $histogram['max']);
+                $summary["{$key}.p99"] = self::quantile(0.99, $bounds, $buckets, $count, $histogram['max']);
+                $summary["{$key}.max"] = $count === 0 ? 0.0 : round($histogram['max'], 6);
+                $this->lastHistograms[$key] = [$histogram['sum'], $histogram['count'], $histogram['buckets']];
             }
         }
 
+        $this->metrics->resetMaxima();
         ksort($summary);
 
         return $summary;
+    }
+
+    /**
+     * The $q quantile of the values counted in $buckets (cumulative counts
+     * per upper bound), interpolated linearly inside its bucket as
+     * Prometheus' histogram_quantile() does, and never above the maximum.
+     *
+     * @param  list<float>  $bounds
+     * @param  list<int>  $buckets
+     */
+    private static function quantile(float $q, array $bounds, array $buckets, int $count, float $max): float
+    {
+        if ($count === 0) {
+            return 0.0;
+        }
+
+        $rank = $q * $count;
+        $lower = 0.0;
+        $below = 0;
+
+        foreach ($bounds as $i => $upper) {
+            if ($buckets[$i] >= $rank) {
+                return round(min($max, $lower + ($upper - $lower) * ($rank - $below) / ($buckets[$i] - $below)), 6);
+            }
+
+            $lower = $upper;
+            $below = $buckets[$i];
+        }
+
+        return round($max, 6); // above the highest bound
     }
 
     /**

@@ -247,7 +247,7 @@ A failed message is still acknowledged, so it is not delivered again. With `HARK
 |---|---|
 | `null` (default) | nothing |
 | `prometheus` | every runtime process serves `GET /metrics` in the Prometheus text format on the HTTP endpoint; scrape each replica |
-| `log` | one log line every `harken.metrics.log_interval` seconds (60) with counter increases, histogram counts and averages, and gauges |
+| `log` | one log line every `harken.metrics.log_interval` seconds (60) with counter increases, gauges, and for each histogram over the interval its count, average, p50 and p99 (estimated from the buckets, as `histogram_quantile()` does) and maximum, in seconds, such as `handler_seconds{sensors/{id}/report}.p99` |
 | `pulse` | records to [Laravel Pulse](https://laravel.com/docs/pulse) every `harken.metrics.pulse_interval` seconds (15), for the Harken cards on the Pulse dashboard; needs `laravel/pulse` |
 
 Metrics are kept per process in memory. Work done outside the runtime (queue workers running `->queued()` handlers, web requests queuing publishes) is not counted here.

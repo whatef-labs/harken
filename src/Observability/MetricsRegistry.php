@@ -11,7 +11,9 @@ namespace Whatef\Harken\Observability;
  *
  * Values use base units (seconds, bytes), as Prometheus expects. Leader
  * takeover times get buckets from 50 ms to a minute; every other histogram
- * (handler and publish latencies) gets buckets from 50 µs to 5 s.
+ * (handler and publish latencies) gets buckets from 50 µs to 5 s. A
+ * histogram also keeps its largest value since resetMaxima(), for the log
+ * driver.
  */
 final class MetricsRegistry implements Metrics
 {
@@ -25,7 +27,7 @@ final class MetricsRegistry implements Metrics
     /** @var array<string, array<string, float>> name => label key => value */
     private array $gauges = [];
 
-    /** @var array<string, array<string, array{buckets: list<int>, sum: float, count: int}>> */
+    /** @var array<string, array<string, array{buckets: list<int>, sum: float, count: int, max: float}>> */
     private array $histograms = [];
 
     /** @var array<string, array<string, string>> label key => labels */
@@ -46,7 +48,7 @@ final class MetricsRegistry implements Metrics
     {
         $key = $this->key($labels);
         $bounds = self::buckets($name);
-        $histogram = $this->histograms[$name][$key] ?? ['buckets' => array_fill(0, count($bounds), 0), 'sum' => 0.0, 'count' => 0];
+        $histogram = $this->histograms[$name][$key] ?? self::emptyHistogram($bounds);
 
         // Cumulative: every bucket whose bound is at least the value counts it.
         $histogram['buckets'] = array_map(
@@ -56,7 +58,21 @@ final class MetricsRegistry implements Metrics
         );
         $histogram['sum'] += $value;
         $histogram['count']++;
+        $histogram['max'] = max($histogram['max'], $value);
         $this->histograms[$name][$key] = $histogram;
+    }
+
+    /**
+     * Starts the largest value of every histogram over.
+     */
+    public function resetMaxima(): void
+    {
+        foreach ($this->histograms as $name => $series) {
+            foreach ($series as $key => $histogram) {
+                $histogram['max'] = 0.0;
+                $this->histograms[$name][$key] = $histogram;
+            }
+        }
     }
 
     /**
@@ -67,7 +83,16 @@ final class MetricsRegistry implements Metrics
      */
     public function declareHistogram(string $name, array $labels = []): void
     {
-        $this->histograms[$name][$this->key($labels)] ??= ['buckets' => array_fill(0, count(self::buckets($name)), 0), 'sum' => 0.0, 'count' => 0];
+        $this->histograms[$name][$this->key($labels)] ??= self::emptyHistogram(self::buckets($name));
+    }
+
+    /**
+     * @param  list<float>  $bounds
+     * @return array{buckets: list<int>, sum: float, count: int, max: float}
+     */
+    private static function emptyHistogram(array $bounds): array
+    {
+        return ['buckets' => array_fill(0, count($bounds), 0), 'sum' => 0.0, 'count' => 0, 'max' => 0.0];
     }
 
     /**
@@ -97,7 +122,7 @@ final class MetricsRegistry implements Metrics
     /**
      * Cumulative bucket counts, in the order of buckets($name).
      *
-     * @return array<string, list<array{array<string, string>, array{buckets: list<int>, sum: float, count: int}}>>
+     * @return array<string, list<array{array<string, string>, array{buckets: list<int>, sum: float, count: int, max: float}}>>
      */
     public function histograms(): array
     {

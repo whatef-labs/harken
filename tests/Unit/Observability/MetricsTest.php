@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Psr\Log\AbstractLogger;
+use Psr\Log\NullLogger;
 use React\EventLoop\StreamSelectLoop;
 use Whatef\Harken\Observability\HttpEndpoint;
 use Whatef\Harken\Observability\MetricsLog;
@@ -97,13 +98,44 @@ it('logs what changed since the last line', function () {
     expect($logger->lines[0])->toBe([
         'handler_seconds{a}.avg' => 3.0,
         'handler_seconds{a}.count' => 2,
+        'handler_seconds{a}.max' => 4.0,
+        'handler_seconds{a}.p50' => 2.5,
+        'handler_seconds{a}.p99' => 4.0,
         'leader' => 1.0,
         'messages_received_total{main}' => 10.0,
     ])->and($logger->lines[1])->toBe([
         'handler_seconds{a}.avg' => 0.0,
         'handler_seconds{a}.count' => 0,
+        'handler_seconds{a}.max' => 0.0,
+        'handler_seconds{a}.p50' => 0.0,
+        'handler_seconds{a}.p99' => 0.0,
         'leader' => 1.0,
         'messages_received_total{main}' => 5.0,
+    ]);
+});
+
+it('logs microsecond latencies with percentiles from the buckets of the interval and its maximum', function () {
+    $metrics = new MetricsRegistry;
+    $log = new MetricsLog($metrics, new NullLogger);
+    $metrics->observe('harken_outbox_latency_seconds', 0.5, ['stream' => 'normal']);
+    $log->summary();
+
+    for ($i = 0; $i < 90; $i++) {
+        $metrics->observe('harken_outbox_latency_seconds', 0.00003, ['stream' => 'normal']);
+    }
+
+    for ($i = 0; $i < 9; $i++) {
+        $metrics->observe('harken_outbox_latency_seconds', 0.0008, ['stream' => 'normal']);
+    }
+
+    $metrics->observe('harken_outbox_latency_seconds', 0.02, ['stream' => 'normal']);
+
+    expect($log->summary())->toBe([
+        'outbox_latency_seconds{normal}.avg' => 0.000299,
+        'outbox_latency_seconds{normal}.count' => 100,
+        'outbox_latency_seconds{normal}.max' => 0.02,
+        'outbox_latency_seconds{normal}.p50' => 0.000028,
+        'outbox_latency_seconds{normal}.p99' => 0.001,
     ]);
 });
 
