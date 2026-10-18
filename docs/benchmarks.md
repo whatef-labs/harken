@@ -43,6 +43,21 @@ The throughput and latency runs (inbound, outbox, isolation) connect to the EMQX
 - While the network is down the broker queues the QoS 1 messages in the leader's persistent session, and the replica receives all of them on reconnect, up to `mqtt.max_mqueue_len` (1 000 by default): at 20 per second one run reconnected after 26 s and the broker dropped the 127 messages beyond that, which is why the script now sends 10 per second. Size the queue for the inbound rate times the longest outage plus the reconnect backoff.
 - A broker restart without durable sessions loses the session: messages published before the replica subscribed again had no subscriber. `harken.connections.*.reconnect.max_delay` shortens that window.
 
+## 24 hours
+
+`php tests/E2E/soak.php 24 1000` runs two replicas (leader and standby, Prometheus metrics, Redis leader lock) for 24 hours. They get QoS 1 device reports at 1 000 per second on a leader route, ten outbox commands and five PostgreSQL notifications per second, and a message to a failing handler every ten seconds; a leader timer runs every second. Every minute the script samples each replica's RSS (`/proc`) and PHP memory (`/health`), and at the end it compares the second hour with the last one.
+
+| Replica | RSS after 1 min | Mean RSS, second hour | Mean RSS, last hour | Range over 24 h | PHP memory |
+|---|---|---|---|---|---|
+| leader | 59.13 MB | 59.16 MB | 59.18 MB | 58.26 – 59.18 MB | 32 MB throughout |
+| standby | 56.76 MB | 56.76 MB | 56.76 MB | 56.59 – 56.76 MB | 32 MB throughout |
+
+- Memory stayed flat: the leader's RSS grew by 0.02 MB from the second hour to the last, the standby's not at all, and PHP memory (`memory_get_usage(true)`) never moved.
+- The generator sent 86 400 000 reports and the leader handled 86 400 000 of them, plus the 8 639 sent to the failing handler: none was lost. Both replicas published from the outbox, 860 008 entries in all, and the streams were empty with nothing pending at the end. The leader handled 430 897 notifications.
+- Neither replica restarted or reconnected, the leader was elected once, and the logs hold no error besides the deliberate failures. Both stopped on SIGTERM with exit code 0.
+- Over the first eight hours the leader used about 6 % of one core, and the standby 0.2 %.
+- Each failed handler is logged with its trace, so the 8 639 failures wrote 47 MB to the leader's log. Rotate the log of a runtime whose handlers fail often.
+
 ## Linux aarch64
 
 The same checks on an Oracle Cloud Ampere A1 instance (Neoverse-N1, 4 cores, 24 GB, Ubuntu 24.04, Docker 29) with the image from `docker/php` built for arm64 (PHP 8.5): 437 unit and 39 integration tests pass; leader takeover loses nothing (SIGKILL 5.0 s, SIGTERM 0.24 s); the life cycle and both outages pass. With ext-uv loaded (`ExtUvLoop`) the unit tests, takeovers, life cycle and outages pass as well.
