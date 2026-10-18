@@ -11,6 +11,7 @@ use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Laravel\HarkenManager;
 use Whatef\Harken\Laravel\RuntimeBuilder;
 use Whatef\Harken\Protocol\Mqtt5\Mqtt5Codec;
+use Whatef\Harken\Protocol\Packet\ConnAck;
 use Whatef\Harken\Protocol\Packet\PubAck;
 use Whatef\Harken\Protocol\Packet\Publish;
 use Whatef\Harken\Runtime\Connection\ConnectionClosed;
@@ -68,20 +69,25 @@ it('announces every connection state change, with the error that caused it', fun
         ->and($events[0][0]->connection)->toBe('main')
         ->and($events[0][0]->clientId)->toBe($runtime->connection->options->clientId)
         ->and($events[1][0]->error)->toBeNull()
-        ->and($events[2][0]->error)->toBeInstanceOf(ConnectionClosed::class);
+        ->and($events[1][0]->sessionPresent)->toBeFalse()
+        ->and($events[2][0]->error)->toBeInstanceOf(ConnectionClosed::class)
+        ->and($events[2][0]->sessionPresent)->toBeNull();
 });
 
-it('announces state changes of the leader connection too', function () {
+it('announces state changes of the leader connection too, with whether the broker kept its session', function () {
     Event::fake([ConnectionStateChanged::class]);
     Harken::topic('sensors/{id}/up', fn () => null);
     [$runtime, $broker] = events_runtime();
 
     $runtime->start();
-    $broker->use(1)->accept();
+    $broker->use(1)->accept(new ConnAck(sessionPresent: true));
 
     Event::assertDispatched(ConnectionStateChanged::class, fn (ConnectionStateChanged $e) => $e->connection === 'leader'
         && $e->clientId === 'laravel-harken-leader'
-        && $e->to === ConnectionState::Connected);
+        && $e->to === ConnectionState::Connected
+        && $e->sessionPresent === true);
+    expect($runtime->status()['leader']['mqtt']['session_present'])->toBeTrue()
+        ->and($runtime->status()['mqtt']['session_present'])->toBeNull();
 });
 
 it('announces a failed handler and keeps acknowledging', function () {

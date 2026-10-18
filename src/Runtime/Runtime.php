@@ -216,6 +216,8 @@ final class Runtime
             'mqtt' => [
                 'state' => $connection->state()->value,
                 'connected_at' => $connection->connectedAt(),
+                // From the last CONNACK; null before the first one.
+                'session_present' => $connection->connectedAt() === null ? null : $connection->sessionPresent(),
                 'disconnected_at' => $connection->disconnectedAt(),
                 'reconnects' => $connection->reconnects(),
                 'received' => $connection->receivedCount(),
@@ -233,6 +235,7 @@ final class Runtime
                 'mqtt' => $leader === null ? null : [
                     'client_id' => $leader->options->clientId,
                     'state' => $leader->state()->value,
+                    'session_present' => $leader->connectedAt() === null ? null : $leader->sessionPresent(),
                     'received' => $leader->receivedCount(),
                 ],
             ],

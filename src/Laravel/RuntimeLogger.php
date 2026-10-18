@@ -75,23 +75,27 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
         return $this->failure;
     }
 
-    public function connectionState(string $connection, string $clientId, ConnectionState $from, ConnectionState $to, ?Throwable $error = null): void
+    /**
+     * @param  bool|null  $sessionPresent  The CONNACK's session present flag, on the change to connected.
+     */
+    public function connectionState(string $connection, string $clientId, ConnectionState $from, ConnectionState $to, ?Throwable $error = null, ?bool $sessionPresent = null): void
     {
         $labels = ['connection' => $connection];
-        $this->metrics->gauge('harken_connected', $to === ConnectionState::Connected ? 1 : 0, $labels);
+        $connected = $to === ConnectionState::Connected;
+        $this->metrics->gauge('harken_connected', $connected ? 1 : 0, $labels);
 
         try {
-            $this->events?->dispatch(new ConnectionStateChanged($connection, $clientId, $from, $to, $to === ConnectionState::Connected ? null : $error));
+            $this->events?->dispatch(new ConnectionStateChanged($connection, $clientId, $from, $to, $connected ? null : $error, $connected ? $sessionPresent : null));
         } catch (Throwable $e) {
             $this->error($e);
         }
 
-        if ($to !== ConnectionState::Connected) {
+        if (! $connected) {
             return;
         }
 
         $this->connects[$connection] = ($this->connects[$connection] ?? 0) + 1;
-        $this->logger->info("Harken {$connection} connection is connected.", $labels);
+        $this->logger->info("Harken {$connection} connection is connected.", $labels + ['session_present' => $sessionPresent]);
 
         if ($this->connects[$connection] > 1) {
             $this->metrics->increment('harken_reconnects_total', 1, $labels);

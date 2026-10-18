@@ -159,7 +159,14 @@ final class RuntimeBuilder
         $connection = new Connection($options, $transport, $options->protocol->codec(), $loop);
         $connection->subscribe($routes->subscriptions());
         $connection->onError(fn ($e) => $logger->connectionError($role, $e));
-        $connection->onStateChange(fn (ConnectionState $from, ConnectionState $to) => $logger->connectionState($role, $options->clientId, $from, $to, $connection->lastError()));
+        $connection->onStateChange(fn (ConnectionState $from, ConnectionState $to) => $logger->connectionState(
+            $role,
+            $options->clientId,
+            $from,
+            $to,
+            $connection->lastError(),
+            $to === ConnectionState::Connected ? $connection->sessionPresent() : null,
+        ));
 
         if ($this->trace !== null) {
             $trace = $this->trace;
