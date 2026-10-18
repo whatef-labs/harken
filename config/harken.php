@@ -248,7 +248,8 @@ return [
     | each runtime process, see http below), "log" (a summary line every
     | log_interval seconds on the logging channel) and "pulse" (recorded to
     | Laravel Pulse every pulse_interval seconds, for the Harken cards on
-    | the Pulse dashboard; needs laravel/pulse).
+    | the Pulse dashboard; needs laravel/pulse). Several can run together,
+    | separated by commas: HARKEN_METRICS_DRIVER=prometheus,log.
     |
     */
 

@@ -327,23 +327,25 @@ final class RuntimeBuilder
 
     /**
      * The HTTP endpoint (/health, and /metrics for the prometheus driver),
-     * the metrics log line and the Pulse reporter, as configured.
+     * the metrics log line and the Pulse reporter, as configured. Several
+     * metrics drivers can run together: they all read the same registry.
      *
      * @param  Closure(): ?Runtime  $runtime
      * @return list<Source>
      */
     private function observability(string $connection, RuntimeLogger $logger, Closure $runtime): array
     {
-        $driver = $this->config->get('harken.metrics.driver', 'null');
+        $drivers = MetricsConfig::drivers($this->config);
         $metrics = $this->app->make(Metrics::class);
         $registry = $metrics instanceof MetricsRegistry ? $metrics : null;
+        $prometheus = in_array('prometheus', $drivers, true);
         $sources = [];
 
-        if ($driver === 'log' && $registry !== null) {
+        if (in_array('log', $drivers, true) && $registry !== null) {
             $sources[] = new MetricsLog($registry, $this->logChannel(), max(1.0, $this->float('harken.metrics.log_interval', 60.0)));
         }
 
-        if ($driver === 'pulse' && $registry !== null) {
+        if (in_array('pulse', $drivers, true) && $registry !== null) {
             $sources[] = new PulseReporter(
                 $this->app->make(Pulse::class),
                 $registry,
@@ -363,7 +365,7 @@ final class RuntimeBuilder
             );
         }
 
-        if ($driver === 'prometheus' || $this->config->get('harken.http.enabled', false)) {
+        if ($prometheus || $this->config->get('harken.http.enabled', false)) {
             $host = $this->config->get('harken.http.host', '0.0.0.0');
             $health = new HealthStore($this->app->make(CacheFactory::class)->store(), (int) $this->float('harken.health.stale_after', 30.0));
 
@@ -382,7 +384,7 @@ final class RuntimeBuilder
 
                     return [$problem === null, ['health' => $problem ?? 'ok'] + $status];
                 },
-                $driver === 'prometheus' ? $registry : null,
+                $prometheus ? $registry : null,
             );
         }
 

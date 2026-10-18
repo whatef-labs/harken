@@ -241,7 +241,7 @@ A failed message is still acknowledged, so it is not delivered again. With `HARK
 
 ## Metrics
 
-`HARKEN_METRICS_DRIVER` picks where metrics go:
+`HARKEN_METRICS_DRIVER` picks where metrics go: one driver, or several separated by commas (`prometheus,log`; a list in `harken.metrics.driver` works too). They read the same in-memory metrics, so they run together without counting anything twice.
 
 | Driver | What it does |
 |---|---|

@@ -8,6 +8,7 @@ use Psr\Log\LoggerInterface;
 use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Laravel\HarkenManager;
 use Whatef\Harken\Laravel\HealthStore;
+use Whatef\Harken\Laravel\MetricsConfig;
 use Whatef\Harken\Laravel\Pulse\PulseReporter;
 use Whatef\Harken\Laravel\RuntimeBuilder;
 use Whatef\Harken\Observability\HttpEndpoint;
@@ -258,24 +259,40 @@ it('runs leader timers once this replica leads, and broadcast timers regardless'
     expect($runs)->toBe(['leader' => 3, 'broadcast' => 6]);
 });
 
-it('picks the metrics driver from the configuration', function (string $driver, string $class) {
+it('picks the metrics driver from the configuration', function (mixed $driver, string $class) {
     config()->set('harken.metrics.driver', $driver);
     app()->forgetInstance(Metrics::class);
 
     expect(app(Metrics::class))->toBeInstanceOf($class);
 })->with([
     ['null', NullMetrics::class],
+    [null, NullMetrics::class],
+    ['', NullMetrics::class],
     ['prometheus', MetricsRegistry::class],
     ['log', MetricsRegistry::class],
     ['pulse', MetricsRegistry::class],
+    ['prometheus, log', MetricsRegistry::class],
+    [['log', 'pulse'], MetricsRegistry::class],
 ]);
 
-it('rejects an unknown metrics driver', function () {
-    config()->set('harken.metrics.driver', 'statsd');
+it('reads several metrics drivers, each once, from a comma-separated list or an array', function (mixed $driver, array $drivers) {
+    config()->set('harken.metrics.driver', $driver);
+
+    expect(MetricsConfig::drivers(config()))->toBe($drivers);
+})->with([
+    ['null', []],
+    ['prometheus,log', ['prometheus', 'log']],
+    [' log , prometheus ,log', ['log', 'prometheus']],
+    ['pulse,', ['pulse']],
+    [['prometheus', 'pulse'], ['prometheus', 'pulse']],
+]);
+
+it('rejects an unknown metrics driver, alone or in a list', function (string $driver) {
+    config()->set('harken.metrics.driver', $driver);
     app()->forgetInstance(Metrics::class);
 
     app(Metrics::class);
-})->throws(InvalidArgumentException::class, 'Unknown Harken metrics driver [statsd]');
+})->with(['statsd', 'prometheus,statsd'])->throws(InvalidArgumentException::class, 'Unknown Harken metrics driver [statsd]');
 
 it('serves /metrics and /health with the prometheus driver, and logs metrics with the log driver', function () {
     config()->set('harken.metrics.driver', 'prometheus');
@@ -310,6 +327,17 @@ it('serves /metrics and /health with the prometheus driver, and logs metrics wit
 
     expect(array_map(fn ($s) => $s::class, $runtime->sources))->toBe([HttpEndpoint::class])
         ->and((fn () => $this->metrics)->call($runtime->sources[0]))->toBeNull();
+});
+
+it('runs several metrics drivers together on the same registry', function () {
+    config()->set('harken.metrics.driver', 'prometheus,log,pulse');
+    config()->set('harken.http.port', 0);
+    app()->forgetInstance(Metrics::class);
+    [$runtime] = built_runtime();
+    $registry = app(MetricsRegistry::class);
+
+    expect(array_map(fn ($s) => $s::class, $runtime->sources))->toBe([MetricsLog::class, PulseReporter::class, HttpEndpoint::class])
+        ->and(array_map(fn ($s) => (fn () => $this->metrics)->call($s), $runtime->sources))->each->toBe($registry);
 });
 
 it('counts received and published messages for the metrics', function () {

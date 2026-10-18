@@ -173,6 +173,8 @@ Method, every run and the scripts are in [docs/benchmarks.md](docs/benchmarks.md
 
 ![Harken dashboard in Grafana](docs/images/dashboard.jpg)
 
+The drivers can run together, for example `HARKEN_METRICS_DRIVER=prometheus,pulse`, and `log` adds a periodic summary line to the log.
+
 ## Documentation
 
 - [docs/api.md](docs/api.md): routes, handlers, publishing, NOTIFY, distribution, configuration, events, metrics and operations

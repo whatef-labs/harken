@@ -69,16 +69,13 @@ final class HarkenServiceProvider extends ServiceProvider
 
         $this->app->singleton(MetricsRegistry::class);
         $this->app->singleton(Metrics::class, static function (Container $app): Metrics {
-            $driver = $app->make(Config::class)->get('harken.metrics.driver', 'null');
+            $drivers = MetricsConfig::drivers($app->make(Config::class));
 
-            return match ($driver) {
-                'prometheus', 'log' => $app->make(MetricsRegistry::class),
-                'pulse' => class_exists(Pulse::class)
-                    ? $app->make(MetricsRegistry::class)
-                    : throw new InvalidArgumentException('The Harken metrics driver [pulse] needs Laravel Pulse: composer require laravel/pulse.'),
-                null, 'null', '' => new NullMetrics,
-                default => throw new InvalidArgumentException('Unknown Harken metrics driver ['.(is_scalar($driver) ? $driver : '?').']; use null, prometheus, log or pulse.'),
-            };
+            if (in_array('pulse', $drivers, true) && ! class_exists(Pulse::class)) {
+                throw new InvalidArgumentException('The Harken metrics driver [pulse] needs Laravel Pulse: composer require laravel/pulse.');
+            }
+
+            return $drivers === [] ? new NullMetrics : $app->make(MetricsRegistry::class);
         });
         $this->app->bind(HandlerInvoker::class, ContainerHandlerInvoker::class);
         $this->app->bind(NotificationInvoker::class, ContainerHandlerInvoker::class);
