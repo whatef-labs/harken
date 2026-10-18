@@ -4,6 +4,8 @@ Runs of real `harken:start` processes against the stack in `docker/compose.yml` 
 
 The throughput and latency runs (inbound, outbox, isolation) connect to the EMQX container's address on the Docker bridge. Going through the published port adds Docker's userland proxy, which took 18 % of the VM's CPU at 15 000 messages per second.
 
+[Six cores](#six-cores) repeats the inbound runs on the same VM with six vCPU, the runtime on a CPU of its own, to find what one process costs and where it stops.
+
 ## Leader takeover
 
 `php tests/E2E/takeover.php kill|term` starts two replicas with a leader route (lease 5 s, Redis lock), publishes QoS 1 messages at 100 per second for 12 s, and stops the leader 3 s in. Each replica also has a leader timer.
@@ -78,6 +80,98 @@ The same checks on an Oracle Cloud Ampere A1 instance (Neoverse-N1, 4 cores, 24 
 - At 20 000 the VM had no idle CPU: EMQX alone used about half of it, the generators most of the rest, and the runtime about a third of one core. The broker's session queue for the runtime filled up (`max_inflight` 32 + `max_mqueue_len` 1 000 by default) and EMQX dropped the overflow, which its `delivery.dropped.queue_full` counter matched exactly. The limit here is the machine, not the runtime process, which was still below 40 % of one core.
 - The runtime spends about 27 µs of CPU per message at 10 000 per second, handler included, and its memory stays flat at 55 MB RSS (`memory_get_usage(true)`: 30 MB).
 
+## Six cores
+
+The same VM resized to **6 vCPU** (host: Intel Core i5-11500, one thread per core). Each runtime process runs pinned to a CPU of its own (`taskset`: CPU 5, then 4, 3, 2 for more replicas); EMQX (five schedulers), Redis, PostgreSQL, the generators and the queue workers share the other CPUs (`docker update --cpuset-cpus`). One generator per 10 000 messages per second, at least two. EMQX runs with its defaults (`mqtt.max_inflight` 32, `mqtt.max_mqueue_len` 1 000) unless a row says otherwise.
+
+`bench.php inbound` takes its switches from the environment (see the script): `E2E_SINGLETON=1` binds the handler as a singleton, `E2E_PHP_ARGS` passes php options to the runtime (`-d opcache.enable_cli=1 -d opcache.jit=tracing -d opcache.jit_buffer_size=64M` for the JIT, `-d extension=uv` for ext-uv), `E2E_QOS=0`, `E2E_REPLICAS`, `E2E_WORKERS`, `E2E_RUNTIME_CPUS` and `E2E_OTHER_CPUS`. CPU per message is the CPU time (user and kernel) of the runtime processes divided by the messages they handled, backlog included.
+
+### What a message costs
+
+10 000 QoS 1 messages per second, three runs of each configuration. None lost a message.
+
+| Configuration | CPU per message | Runtime CPU | Latency p99 | RSS |
+|---|---|---|---|---|
+| Baseline: `StreamSelectLoop`, handler resolved from the container per message, no JIT, metrics `null` | 28.1 – 28.6 µs | 28 % | 1.9 – 2.0 ms | 56 MB |
+| Handler bound as a singleton | 26.0 – 27.9 µs | 26 % | 1.9 – 2.1 ms | 56 MB |
+| JIT (`opcache.jit=tracing`) | 22.1 – 25.3 µs | 23 % | 1.8 – 1.9 ms | 80 MB |
+| Singleton and JIT | 19.6 – 20.4 µs | 20 % | 1.8 – 2.0 ms | 80 MB |
+| ext-uv (`ExtUvLoop`) | 31.0 – 36.1 µs | 32 % | 1.7 – 2.0 ms | 57 MB |
+| ext-uv, singleton and JIT | 21.7 – 24.9 µs | 21 % | 1.9 ms | 81 MB |
+| Baseline with `prometheus` metrics | 30.3 – 32.9 µs | 30 % | 2.1 ms | 56 MB |
+| Singleton and JIT with `prometheus` metrics | 22.2 – 25.3 µs | 23 % | 2.0 ms | 80 MB |
+| Baseline at QoS 0 | 17.9 – 19.6 µs | 19 % | 1.4 – 1.7 ms | 56 MB |
+
+- The benchmark handler has no constructor dependencies, so building it per message is cheap: the singleton saves 2 µs here, more for a handler with dependencies to resolve.
+- The JIT shortens the PHP part of the work; the kernel part (socket reads and writes, 4 – 5 µs per message) stays. Its buffer adds 24 MB of memory. With the handler as a singleton, a message costs 20 µs instead of 28.5.
+- ext-uv gained nothing at this rate: it used more CPU than `stream_select`, for a slightly lower median latency.
+- The `prometheus` driver costs 2 – 3 µs per message (a counter and a histogram).
+- QoS 0 saves 9 µs per message (no PUBACK, nothing to track) and cuts the broker's CPU by about 40 %.
+
+### Where one process stops
+
+One runtime process, QoS 1, rate raised until messages are lost. Each cell: lost, latency p99, runtime CPU.
+
+| Inbound / s | EMQX `max_inflight` | Baseline | Singleton and JIT |
+|---|---|---|---|
+| 20 000 | 32 | 0, 3.5 ms, 63 % | 0, 3.5 ms, 43 % |
+| 30 000 | 32 | 0, 23.6 ms, 83 % | 0, 3.6 ms, 60 % |
+| 30 000 | 128 | 0, 12.1 ms, 82 % | 0, 4.0 ms, 58 % |
+| 40 000 | 32 | 25 %, 43 ms, 76 % | 19 %, 54 ms, 65 % |
+| 40 000 | 128 | 5.3 %, 40 ms, 86 % | 5.5 %, 43 ms, 66 % |
+| 50 000 | 128 | 58 %, 160 ms, 64 % | 40 %, 203 ms, 57 % |
+
+At QoS 0 the singleton and JIT configuration lost nothing at 30 000, 40 000, 50 000 and 60 000 messages per second (p99 2.3 – 3.1 ms, 12.5 – 13.2 µs per message, 73 % of its CPU at 60 000).
+
+- **Above 30 000 QoS 1 messages per second the limit was the broker's delivery to one session, not the process.** The runtime's CPU was not full (57 – 86 %), both configurations lost about as much, and every lost message was dropped by EMQX from the session's full queue (`delivery.dropped.queue_full`). EMQX sends one session at most `max_inflight` unacknowledged QoS 1 messages; raising it from 32 to 128 moved the limit from 30 000 – 32 000 to about 38 000 per second. QoS 0, which has no acknowledgements, went to 60 000.
+- Up to that limit the JIT and singleton configuration kept p99 at 3.5 – 4 ms, where the baseline's grew to 12 – 24 ms at 30 000 as its CPU filled up.
+- At 50 000 the five CPUs of the broker and the generators were nearly full as well.
+
+### Shared subscription over replicas (X-04)
+
+The route `->shared('bench')`, one to four replicas each on a CPU of its own, baseline configuration, `max_inflight` 128. The broker, Redis and the generators keep the remaining CPUs: four with two replicas, two with four.
+
+| Replicas | Inbound / s | Lost | Messages per replica | CPU per replica | CPU per message, all replicas | Latency p99 |
+|---|---|---|---|---|---|---|
+| 1 | 20 000 | 0 | 200 000 | 52 % | 26.4 µs | 3.0 ms |
+| 2 | 20 000 | 0 | 100 000 each | 42 – 43 % | 43.7 µs | 3.2 ms |
+| 4 | 20 000 | 0 | 50 000 each | 23 – 24 % | 49.0 µs | 17.4 ms |
+| 2 | 30 000 | 0 | 150 000 each | 54 – 56 % | 37.5 µs | 7.0 ms |
+| 2 | 40 000 | 6 of 400 000 | 200 000 and 199 994 | 61 % | 31.3 µs | 24.0 ms |
+| 2 | 50 000 | 16 % | 213 136 and 208 214 | 55 – 56 % | 26.9 µs | 69 ms |
+
+- The broker split the messages evenly. Each replica has its own session, so two replicas took 40 000 QoS 1 messages per second that one session could not; at 50 000 the four CPUs left to the broker and the generators were full.
+- Splitting the same rate costs more CPU in all: each replica gets fewer messages per read, so more wake-ups and system calls per message. Add replicas for throughput beyond one session, not to save CPU.
+- With four replicas the broker had two CPUs, which shows in the p99.
+
+### Queued handlers (X-05)
+
+The route `->queued()`, one runtime process, and 1, 2 or 4 `queue:work redis --sleep=0.01` workers sharing CPUs with the broker, Redis and the generators. Latency is from the broker publish to the handler in the worker.
+
+| Workers | Inbound / s | Lost | Runtime: CPU per message, CPU | Worker CPU per job | Queue empty after the last message | Latency p50, p99 |
+|---|---|---|---|---|---|---|
+| 1 | 1 000 | 0 | 154 µs, 15 % | 605 µs | at once | 8 ms, 22 ms |
+| 1 | 2 000 | 0 | 139 µs, 27 % | 574 µs | 6.7 s | 3.9 s, 6.8 s |
+| 1 | 5 000 | 0 | 113 µs, 55 % | 549 µs | 30.8 s | 16.7 s, 30.7 s |
+| 2 | 1 000 | 0 | 167 µs, 16 % | 752 µs | at once | 6 ms, 12 ms |
+| 2 | 2 000 | 0 | 152 µs, 30 % | 695 µs | at once | 106 ms, 180 ms |
+| 2 | 5 000 | 6 % | 116 µs, 53 % | 646 µs | 12.7 s | 7.6 s, 12.8 s |
+| 4 | 1 000 | 0 | 171 µs, 17 % | 994 µs | at once | 6.5 ms, 12 ms |
+| 4 | 2 000 | 0 | 153 µs, 30 % | 844 µs | at once | 5 ms, 18 ms |
+| 4 | 5 000 | 29 % | 126 µs, 43 % | 796 µs | 2.6 s | 1.9 s, 2.7 s |
+
+- **Queuing a message costs the runtime 110 – 170 µs, four to six times an inline handler**: Laravel builds the job payload and pushes it to Redis, and the push waits for Redis's answer on the event loop.
+- That wait limits how fast one process can queue. With two and four workers polling the same Redis on the same CPUs, the push took longer and the runtime fell behind at 5 000 per second while its CPU was half idle: the broker dropped what its session queue could not hold. With one worker the same rate went through.
+- One worker ran about 1 200 jobs per second, two about 2 100 and four about 2 800 on CPUs they shared with everything else.
+- Queue slow work, as in [latency isolation](#latency-isolation-under-load), where it keeps publishing fast. For light messages at high rates, handle them inline, and share the route over replicas for more.
+
+### For more throughput
+
+- Bind handlers that keep no per-message state as singletons, and enable the JIT for the runtime's CLI: 28.5 → 20 µs per message here.
+- A QoS 1 subscription is limited by the broker's delivery to its session: raise EMQX's `mqtt.max_inflight` (32 by default), and share the route over replicas beyond that.
+- Use QoS 0 for messages you can afford to lose: less CPU per message, and no limit from acknowledgements.
+- Queue only slow work: queuing costs the event loop more than a light handler.
+
 ## Outbox throughput
 
 `php tests/E2E/bench.php outbox 50000`: with a runtime running, 50 000 entries are queued in the outbox stream at once (0.3 s with a pipelined client), and the run ends when the stream is empty. Each entry is published QoS 1, acknowledged by the broker, then acknowledged and deleted in Redis.
@@ -106,6 +200,7 @@ A 400-byte QoS 1 PUBLISH, encoded and decoded 100 000 times on the VM (`MQTT 5 +
 | MQTT 3.1.1 (binsoul/net-mqtt) | 671 000 | 301 000 |
 | MQTT 5 (Harken) | 587 000 | 474 000 |
 | MQTT 5 + properties | 247 000 | 142 000 |
+
 ## Latency isolation under load
 
 `php tests/E2E/load.php inline|queued|sync <rate>` measures what a slow handler does to publishing:

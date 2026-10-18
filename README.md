@@ -149,7 +149,13 @@ Measured with real `harken:start` processes on a small virtual machine: **2 vCPU
 | 24 hours at 1,000 msg/s, two replicas, outbox and PostgreSQL NOTIFY traffic | 86.4 million messages, **0 lost**, **memory flat** (leader RSS +0.02 MB from the second hour to the last), 6 % of one core |
 | MQTT 5 codec, 400-byte PUBLISH | 474,000 decoded/s, 587,000 encoded/s |
 
-These numbers are a floor rather than a ceiling. At 20,000 messages per second the machine had no idle CPU left: the broker and the generators used most of it, the runtime about a third of one core, and the broker started dropping messages. A runtime process spends roughly 27 µs of CPU per message at 10,000 msg/s, handler included. Method, every run and the scripts are in [docs/benchmarks.md](docs/benchmarks.md).
+On two cores these numbers are a floor rather than a ceiling: at 20,000 messages per second the broker and the generators used up the machine. Resized to **six cores**, with the runtime on a core of its own:
+
+- A message costs **28 µs** of CPU, handler included, or **20 µs** with the handler bound as a singleton and the JIT on.
+- One runtime process received **30,000 QoS 1 messages per second without loss** (p99 3.6 ms, 60 % of its core with the singleton and the JIT). Above that the limit was the broker's delivery to one session (EMQX `max_inflight`), not the process: at QoS 0 the same process took **60,000 per second** without loss, and two replicas sharing the route took **40,000 QoS 1 messages per second**.
+- `->queued()` costs the event loop 110 – 170 µs per message (the Redis push), so queue slow work, not every message.
+
+Method, every run and the scripts are in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Monitoring
 

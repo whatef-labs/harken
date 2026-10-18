@@ -83,6 +83,8 @@ Handlers that are **not** queued run inline on the event loop and must not block
 
 Ordering: inline handlers of one connection run one at a time, in the order the broker delivered the messages, so a leader route sees every message in order in a single process. `->queued()` handlers run on queue workers and may run out of order and in parallel; keep order-sensitive or per-source state in an inline handler and queue only the work that follows from it.
 
+Cost: pushing the job to the queue happens on the event loop and waits for the queue's answer, which [measured](benchmarks.md#queued-handlers-x-05) 110 – 170 µs per message against about 28 µs for a light inline handler. Queue slow work; handle light, frequent messages inline. A handler class that keeps no per-message state can be bound as a singleton in the container, so it is not built again for every message.
+
 ### `Whatef\Harken\Runtime\Message` — stable
 
 ```php
