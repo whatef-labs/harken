@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Cache;
+use Psr\Log\AbstractLogger;
+use Psr\Log\LoggerInterface;
 use Whatef\Harken\Facades\Harken;
 use Whatef\Harken\Laravel\HarkenManager;
 use Whatef\Harken\Laravel\HealthStore;
@@ -16,11 +18,15 @@ use Whatef\Harken\Observability\NullMetrics;
 use Whatef\Harken\Observability\PrometheusFormat;
 use Whatef\Harken\Protocol\Mqtt5\Mqtt5Codec;
 use Whatef\Harken\Protocol\Packet\ConnAck;
+use Whatef\Harken\Protocol\Packet\Disconnect;
 use Whatef\Harken\Protocol\Packet\PubAck;
 use Whatef\Harken\Protocol\Packet\Publish;
+use Whatef\Harken\Protocol\ReasonCode;
+use Whatef\Harken\Runtime\Connection\ConnectionRefused;
 use Whatef\Harken\Runtime\Leadership\LeadershipState;
 use Whatef\Harken\Runtime\Outbox\RedisStreamsOutbox;
 use Whatef\Harken\Runtime\Runtime;
+use Whatef\Harken\Runtime\RuntimeState;
 use Whatef\Harken\Tests\Fixtures\RecordingHandler;
 use Whatef\Harken\Tests\Support\FakeBroker;
 use Whatef\Harken\Tests\Support\FakeLoop;
@@ -131,6 +137,57 @@ it('writes its heartbeat for harken:status, which fails once it goes stale', fun
     $this->artisan('harken:status')
         ->expectsOutputToContain('no heartbeat for')
         ->assertFailed();
+});
+
+/**
+ * A logger that keeps the messages, bound where the runtime looks for one.
+ */
+function recording_logger(): AbstractLogger
+{
+    $logger = new class extends AbstractLogger
+    {
+        /** @var list<string> */
+        public array $messages = [];
+
+        public function log($level, string|Stringable $message, array $context = []): void
+        {
+            $this->messages[] = "{$level}: {$message}".(isset($context['exit_code']) ? " exit code {$context['exit_code']}" : '');
+        }
+    };
+    app()->instance(LoggerInterface::class, $logger);
+
+    return $logger;
+}
+
+it('stops with exit code 1, logging the cause once, when the broker refuses the connection for good', function () {
+    $logger = recording_logger();
+    [$runtime, $broker, $loop] = built_runtime();
+    $runtime->start();
+    $broker->use(0)->accept(new ConnAck(ReasonCode::NotAuthorized));
+    $loop->advance(1.0);
+
+    expect($runtime->state())->toBe(RuntimeState::Stopped)
+        ->and($runtime->failure())->toBeInstanceOf(ConnectionRefused::class)
+        ->and(array_values(array_filter($logger->messages, fn (string $m) => str_contains($m, 'cannot continue'))))
+        ->toBe(['error: Harken cannot continue: The broker refused the MQTT 5.0 connection: 0x87 not authorized.'])
+        ->and($logger->messages)->toContain('info: Harken runtime stopped (failure). exit code 1');
+});
+
+it('stops with exit code 1, logging the cause once, when another client takes the leader session under the none lock', function () {
+    $logger = recording_logger();
+    [$runtime, $broker, $loop] = built_runtime();
+    $runtime->start();
+    $broker->use(0)->accept();
+    $broker->grant();
+    $broker->use(1)->accept();
+    $broker->grant();
+
+    $broker->send(new Disconnect(ReasonCode::SessionTakenOver));
+    $loop->advance(1.0);
+
+    expect($runtime->state())->not->toBe(RuntimeState::Running)
+        ->and($runtime->failure()?->getMessage())->toContain('With the "none" leader lock only one replica may run')
+        ->and(array_filter($logger->messages, fn (string $m) => str_contains($m, 'cannot continue')))->toHaveCount(1);
 });
 
 it('reports no runtime on this host', function () {

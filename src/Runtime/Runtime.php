@@ -256,7 +256,8 @@ final class Runtime
      */
     public function fail(Throwable $error): void
     {
-        if ($this->state !== RuntimeState::Running) {
+        // The observer may report the failure back here while it is handled.
+        if ($this->state !== RuntimeState::Running || $this->failure !== null) {
             return;
         }
 

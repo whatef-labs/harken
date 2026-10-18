@@ -126,11 +126,20 @@ final class RuntimeLogger implements LeadershipObserver, OutboxObserver, Runtime
 
         $runtime = $this->runtime;
 
-        if ($runtime !== null && $runtime->state() === RuntimeState::Running) {
-            $this->logger->error("Harken cannot continue: {$error->getMessage()}", ['exception' => $error::class]);
-            $this->console('error', $error->getMessage());
-            $runtime->fail($error);
+        if ($runtime === null || $runtime->state() !== RuntimeState::Running) {
+            return;
         }
+
+        // The election or a source failed: stop the runtime, which reports
+        // the failure back here.
+        if ($runtime->failure() === null) {
+            $runtime->fail($error);
+
+            return;
+        }
+
+        $this->logger->error("Harken cannot continue: {$error->getMessage()}", ['exception' => $error::class]);
+        $this->console('error', $error->getMessage());
     }
 
     public function stopping(string $reason): void
