@@ -2,8 +2,13 @@
     "name": "whatef/harken",
     "description": "A long-running, event-driven MQTT client runtime for Laravel.",
     "keywords": ["laravel", "mqtt", "reactphp", "iot", "runtime"],
+    "homepage": "https://github.com/whatef-labs/harken",
     "license": "MIT",
     "type": "library",
+    "support": {
+        "issues": "https://github.com/whatef-labs/harken/issues",
+        "source": "https://github.com/whatef-labs/harken"
+    },
     "require": {
         "php": "^8.4",
         "binsoul/net-mqtt": "^2.0",
